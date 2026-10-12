@@ -3,7 +3,13 @@ import asyncio
 import logging
 from datetime import datetime
 from pathlib import Path
-from telegram import Update, constants
+from telegram import (
+    Update,
+    constants,
+    BotCommand,
+    BotCommandScopeAllPrivateChats,
+    BotCommandScopeAllGroupChats,
+)
 from telegram.error import TimedOut, NetworkError
 from telegram.ext import (
     ApplicationBuilder,
@@ -535,8 +541,34 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await file.download_to_drive(dest)
     await handle_multimodal_message(update, context, media_path=dest, media_type="document", prompt_text=caption)
 
+BOT_COMMANDS = [
+    BotCommand("start", "Welcome message and overview"),
+    BotCommand("help", "Show all available features"),
+    BotCommand("report", "Daily executive briefing (VPS, Docker & Memory)"),
+    BotCommand("backup", "Download snapshot backup of memory database"),
+    BotCommand("vps", "Live CPU, 24GB RAM, Disk, & Uptime metrics"),
+    BotCommand("docker", "List all running Docker containers"),
+    BotCommand("mltb_logs", "Read recent download logs from MLTB"),
+    BotCommand("mltb_restart", "Restart MLTB container if downloads freeze"),
+    BotCommand("draw", "Generate image with Google Gemini"),
+    BotCommand("video", "Generate cinematic video with Google Veo 3.1"),
+    BotCommand("speak", "Speak text in bilingual neural voice"),
+    BotCommand("rules", "View active learned rules and preferences"),
+    BotCommand("delete_rule", "Remove a learned rule by ID"),
+    BotCommand("clear_rules", "Clear all learned rules"),
+    BotCommand("facts", "View remembered personal facts"),
+    BotCommand("clear", "Reset short-term conversation context"),
+]
+
 async def post_init_hook(application):
-    """Initializes the background scheduler service once the application event loop is running."""
+    """Registers slash commands for both Private Chats and Group Chats, and starts scheduler."""
+    try:
+        await application.bot.set_my_commands(BOT_COMMANDS, scope=BotCommandScopeAllPrivateChats())
+        await application.bot.set_my_commands(BOT_COMMANDS, scope=BotCommandScopeAllGroupChats())
+        logger.info("Successfully registered slash commands for both private and group chats.")
+    except Exception as e:
+        logger.warning(f"Failed to auto-register bot commands: {e}")
+
     logger.info("Initializing SchedulerService in event loop...")
     scheduler = SchedulerService(
         bot=application.bot,
