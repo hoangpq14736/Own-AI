@@ -37,6 +37,7 @@ class Settings(BaseModel):
     git_branch: str = Field(default="main")
     git_repo_url: str = Field(default="https://github.com/hoangpq14736/Own-AI.git")
     enable_group_free_chat: bool = Field(default=False)
+    github_token: str = Field(default="")
 
     model_config = {
         "frozen": True,
@@ -124,6 +125,7 @@ def load_settings_from_env() -> Settings:
         git_branch=git_branch,
         git_repo_url=git_repo_url,
         enable_group_free_chat=enable_group_free,
+        github_token=os.getenv("GITHUB_TOKEN", "").strip(),
     )
 
 
@@ -142,3 +144,4 @@ ADMIN_CHAT_ID = settings.get_admin_chat_id()
 AUTO_UPDATE_ON_RESTART = settings.auto_update_on_restart
 GIT_BRANCH = settings.git_branch
 ENABLE_GROUP_FREE_CHAT = settings.enable_group_free_chat
+GITHUB_TOKEN = settings.github_token

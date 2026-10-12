@@ -19,6 +19,23 @@ from config import Settings
 logger = logging.getLogger(__name__)
 
 
+def _git_env() -> dict:
+    """Returns environment variables with interactive prompts disabled."""
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    return env
+
+
+def _build_git_cmd(args: list) -> list:
+    """Builds git command with optional GitHub token authorization header."""
+    cmd = ["git"]
+    token = getattr(config.settings, "github_token", "").strip()
+    if token:
+        cmd.extend(["-c", f"http.extraHeader=Authorization: token {token}"])
+    cmd.extend(args)
+    return cmd
+
+
 def _ensure_git_safe_directory(repo_dir: Path) -> None:
     """Configures Git safe.directory to prevent dubious ownership errors in Docker."""
     try:
@@ -28,6 +45,7 @@ def _ensure_git_safe_directory(repo_dir: Path) -> None:
             text=True,
             timeout=5,
             check=False,
+            env=_git_env(),
         )
     except Exception as e:
         logger.debug(f"Failed to set git safe.directory: {e}")
@@ -92,12 +110,13 @@ def check_for_updates(
 
         # 1. Fetch remote branch
         subprocess.run(
-            ["git", "fetch", remote, branch],
+            _build_git_cmd(["fetch", remote, branch]),
             cwd=str(base_dir),
             capture_output=True,
             text=True,
             timeout=timeout,
             check=True,
+            env=_git_env(),
         )
 
         # 2. Local HEAD info
@@ -171,7 +190,11 @@ def check_for_updates(
             error=err_msg,
         )
     except subprocess.CalledProcessError as e:
-        err_msg = f"Git error: {e.stderr or str(e)}"
+        raw_err = e.stderr.strip() if e.stderr else str(e)
+        if "could not read username" in raw_err.lower():
+            err_msg = "Repository is Private. Make it Public on GitHub or add GITHUB_TOKEN to your .env file."
+        else:
+            err_msg = f"Git error: {raw_err}"
         logger.warning(err_msg)
         curr_hash, curr_msg = get_current_commit_info(base_dir)
         return UpdateInfo(
@@ -214,12 +237,13 @@ def apply_update(
 
         # 1. Pull changes
         pull_res = subprocess.run(
-            ["git", "pull", remote, branch],
+            _build_git_cmd(["pull", remote, branch]),
             cwd=str(base_dir),
             capture_output=True,
             text=True,
             timeout=timeout,
             check=True,
+            env=_git_env(),
         )
 
         # 2. Check if requirements.txt changed
@@ -230,6 +254,7 @@ def apply_update(
             text=True,
             timeout=10,
             check=False,
+            env=_git_env(),
         )
         changed_files = diff_res.stdout.splitlines() if diff_res.stdout else []
         if any("requirements.txt" in f for f in changed_files):
@@ -249,6 +274,8 @@ def apply_update(
     except subprocess.CalledProcessError as e:
         err_msg = e.stderr.strip() if e.stderr else str(e)
         logger.error(f"Failed to apply update: {err_msg}")
+        if "could not read username" in err_msg.lower():
+            return False, "Repository is Private. Make it Public on GitHub (Settings -> Danger Zone) or add GITHUB_TOKEN to .env."
         return False, f"Git pull failed: {err_msg}"
     except Exception as e:
         logger.error(f"Failed to apply update: {e}")

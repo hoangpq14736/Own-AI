@@ -317,3 +317,24 @@ class TestUpdaterEdgeCases:
     def test_restart_bot_process(self, mock_execv):
         restart_bot_process()
         mock_execv.assert_called_once()
+
+    @patch("subprocess.run")
+    def test_check_for_updates_private_repo_error(self, mock_run):
+        mock_run.side_effect = subprocess.CalledProcessError(
+            128, ["git", "fetch"], stderr="fatal: could not read Username for 'https://github.com': No such device or address"
+        )
+        info = check_for_updates()
+        assert info.has_update is False
+        assert "Private" in info.error
+
+    @patch("subprocess.run")
+    def test_apply_update_private_repo_error(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout=""),
+            subprocess.CalledProcessError(
+                128, ["git", "pull"], stderr="fatal: could not read Username for 'https://github.com': No such device or address"
+            )
+        ]
+        success, msg = apply_update()
+        assert success is False
+        assert "Private" in msg
