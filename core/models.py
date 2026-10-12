@@ -4,7 +4,7 @@ Supports both object attribute access, dict-like indexing, and mapping membershi
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 
 
 @dataclass(frozen=True)
@@ -247,4 +247,43 @@ class ScheduledReport:
             "report_type": self.report_type,
             "text": self.text,
             "timestamp": self.timestamp,
+        }
+
+
+@dataclass(frozen=True)
+class UpdateInfo:
+    """Immutable representation of repository update status."""
+    current_commit: str
+    current_commit_message: str
+    latest_commit: str
+    latest_commit_message: str
+    has_update: bool
+    behind_count: int = 0
+    commits_behind: Tuple[str, ...] = ()
+    error: Optional[str] = None
+
+    def __getitem__(self, key: Any) -> Any:
+        if not isinstance(key, str):
+            raise TypeError(f"Key must be string, not {type(key).__name__}")
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            raise KeyError(key)
+
+    def __contains__(self, key: Any) -> bool:
+        return isinstance(key, str) and hasattr(self, key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key, default)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "current_commit": self.current_commit,
+            "current_commit_message": self.current_commit_message,
+            "latest_commit": self.latest_commit,
+            "latest_commit_message": self.latest_commit_message,
+            "has_update": self.has_update,
+            "behind_count": self.behind_count,
+            "commits_behind": list(self.commits_behind),
+            "error": self.error,
         }

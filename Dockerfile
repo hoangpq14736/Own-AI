@@ -12,11 +12,14 @@ WORKDIR /app
 # Install system dependencies:
 # - ca-certificates & curl: secure HTTPS API communication
 # - ffmpeg: audio and video transcoding
+# - git: auto-updater repository management
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+    git \
+    && rm -rf /var/lib/apt/lists/* \
+    && git config --global --add safe.directory '*'
 
 # Install python dependencies
 COPY requirements.txt .

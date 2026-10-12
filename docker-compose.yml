@@ -6,6 +6,8 @@ services:
     env_file:
       - .env
     volumes:
+      # Live repository mount: enables in-place git updates to persist on VPS host
+      - .:/app
       # Persistent storage: guarantees database & memories never disappear across restarts
       - ./data:/app/data
       # Docker socket: allows the AI assistant to inspect and supervise mirrorbot-app-1

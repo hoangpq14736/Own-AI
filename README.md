@@ -18,10 +18,12 @@ A self-learning, multimodal AI assistant powered by **Google Gemini** and deploy
   * 🐳 **Container Status**: Inspect running Docker containers on host (`/docker`).
   * 📋 **MLTB Logs**: Tail the last $N$ lines of download logs from `mirrorbot-app-1` (`/mltb_logs`).
   * 🔄 **Safe Restart**: Send restart signals to freeze-prone containers (`/mltb_restart`).
-* **Automated Background Operations**:
+* **Automated Background Operations & Self-Updating**:
   * ☀️ **Daily Health Briefing**: Automated executive summary sent every morning at 08:00 AM (`/report`).
   * 📦 **Atomic Database Backup**: Scheduled SQLite database snapshot delivered directly to Telegram (`/backup`).
   * 🚨 **Proactive Storage Watchdog**: Automatic alerts when disk capacity exceeds 85%.
+  * 🔄 **Auto-Update on Restart**: Checks GitHub for new commits on every bot restart or VPS boot. Pulls changes, updates dependencies, and reloads in-place.
+  * 🛠️ **On-Demand Updates**: Check status via `/check_update` and trigger instant update via `/update`.
 * **Group & Control Room Integration**:
   * Zero-spam target filtering: In groups, the bot stays silent unless mentioned (`@bot_username`), replied to, or given commands.
 
@@ -38,12 +40,13 @@ Own AI/
 │   ├── gemini_client.py    # Async multimodal Gemini client with 503 failover
 │   ├── media_generator.py  # Google Image, Veo 3.1 Video, & Edge-TTS
 │   ├── memory.py           # Thread-safe SQLite persistent memory engine
-│   ├── models.py           # Frozen domain models (LearnedRule, VPSMetrics, etc.)
+│   ├── models.py           # Frozen domain models (LearnedRule, UpdateInfo, etc.)
 │   ├── reflector.py        # Smart 1-request background reflection agent
 │   ├── scheduler.py        # Automated daily reports & SQLite backups
 │   ├── telegram_utils.py   # Group mention stripping & authorization
+│   ├── updater.py          # Git auto-updater, dependency installer & in-place reload
 │   └── vps_manager.py      # VPS health metrics & Docker supervisor
-├── tests/                  # 73 automated tests (92% coverage)
+├── tests/                  # 95 automated tests (93% coverage)
 ├── Dockerfile              # Linux ARM64 / AMD64 multi-arch container
 ├── docker-compose.yml      # Docker Compose mounting ./data & docker.sock
 ├── requirements.txt        # Production Python dependencies
@@ -96,6 +99,16 @@ docker compose up -d --build
 # View live logs
 docker compose logs -f
 ```
+
+---
+
+## 🔄 Automatic & On-Demand Updates
+
+* **Auto-Update on Restart / Reboot**:
+  Every time the VPS restarts or the bot container boots up, it automatically checks the GitHub repository (`origin/main`). If you pushed changes, the bot pulls them, installs any new packages in `requirements.txt`, and cleanly reloads in-place.
+* **On-Demand Telegram Commands**:
+  * `/check_update` — Inspects GitHub to see if your local version is behind, showing new commit hashes and descriptions.
+  * `/update` — Pulls new commits immediately and reloads the bot within seconds without needing SSH.
 
 ---
 

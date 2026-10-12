@@ -1,3 +1,4 @@
+import os
 import io
 import asyncio
 import logging
@@ -32,6 +33,13 @@ from core.vps_manager import (
 )
 from core.scheduler import SchedulerService, create_daily_health_report, create_memory_backup
 from core.telegram_utils import strip_bot_mention, is_message_targeted_at_bot
+from core.updater import (
+    check_for_updates,
+    apply_update,
+    restart_bot_process,
+    check_and_apply_update_on_startup,
+    get_current_commit_info,
+)
 
 # Setup Logging
 logging.basicConfig(
@@ -107,6 +115,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• 🐳 `/docker` - List active containers on your VPS\n"
         "• 📋 `/mltb_logs` - Read last 25 lines of MLTB download logs\n"
         "• 🔄 `/mltb_restart` - Restart MLTB if downloads freeze\n\n"
+        "**Auto-Updates & Maintenance:**\n"
+        "• 🔍 `/check_update` - Check for new commits on GitHub\n"
+        "• 🚀 `/update` - Pull latest updates & restart bot\n\n"
         "**Self-Learning Memory:**\n"
         "• `/rules` - View learned rules\n"
         "• `/delete_rule <id>` - Remove a rule\n"
@@ -207,6 +218,80 @@ async def mltb_restart_command(update: Update, context: ContextTypes.DEFAULT_TYP
     status_msg = await update.message.reply_text("🔄 Sending restart signal to `mirrorbot-app-1`...")
     text = restart_mltb_container(container_name="mirrorbot-app-1")
     await status_msg.edit_text(text, parse_mode=constants.ParseMode.MARKDOWN)
+
+# --- Repository Update & Maintenance Commands ---
+
+async def check_update_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Checks for new commits on the configured GitHub repository branch."""
+    if not is_authorized(update.effective_user.id):
+        if update.effective_chat.type == constants.ChatType.PRIVATE:
+            await update.message.reply_text("⛔ Unauthorized.")
+        return
+
+    status_msg = await update.message.reply_text("🔍 Checking GitHub repository for updates...")
+    info = check_for_updates(branch=config.GIT_BRANCH)
+
+    if info.has_update:
+        commits_preview = "\n".join(f"• `{c}`" for c in info.commits_behind[:5])
+        if len(info.commits_behind) > 5:
+            commits_preview += f"\n... and {len(info.commits_behind) - 5} more commit(s)"
+        text = (
+            f"🔄 **Update Available!**\n\n"
+            f"• **Current Version:** `{info.current_commit}`\n"
+            f"• **Latest Version:** `{info.latest_commit}` - _{info.latest_commit_message}_\n"
+            f"• **Commits Behind:** {info.behind_count}\n\n"
+            f"**Recent Commits:**\n{commits_preview}\n\n"
+            f"👉 Send `/update` to pull changes and restart the bot."
+        )
+    elif info.error:
+        text = (
+            f"⚠️ **Could not check for updates:**\n`{info.error}`\n\n"
+            f"• Current version: `{info.current_commit}` - _{info.current_commit_message}_"
+        )
+    else:
+        text = (
+            f"✅ **Bot is up to date!**\n\n"
+            f"• **Running Commit:** `{info.current_commit}`\n"
+            f"• **Message:** _{info.current_commit_message}_\n"
+            f"• **Branch:** `{config.GIT_BRANCH}`"
+        )
+
+    await status_msg.edit_text(text, parse_mode=constants.ParseMode.MARKDOWN)
+
+async def update_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Pulls latest updates from GitHub and restarts the bot process."""
+    if not is_authorized(update.effective_user.id):
+        if update.effective_chat.type == constants.ChatType.PRIVATE:
+            await update.message.reply_text("⛔ Unauthorized.")
+        return
+
+    status_msg = await update.message.reply_text("🔍 Checking repository before updating...")
+    info = check_for_updates(branch=config.GIT_BRANCH)
+
+    if not info.has_update and not info.error:
+        await status_msg.edit_text(
+            f"✅ Bot is already running the latest commit (`{info.current_commit}`). No update needed.",
+            parse_mode=constants.ParseMode.MARKDOWN,
+        )
+        return
+
+    await status_msg.edit_text("📥 Pulling latest code and verifying dependencies...")
+    success, msg = apply_update(branch=config.GIT_BRANCH)
+
+    if not success:
+        await status_msg.edit_text(
+            f"❌ **Update Failed:**\n`{msg}`\n\nPlease check git status or VPS permissions.",
+            parse_mode=constants.ParseMode.MARKDOWN,
+        )
+        return
+
+    await status_msg.edit_text(
+        f"✅ **{msg}**\n\n🚀 Restarting bot now... I will be back online in a few seconds!",
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    # Pause briefly to ensure Telegram sends the reply before process replacement
+    await asyncio.sleep(1.0)
+    restart_bot_process()
 
 # --- Media Generation Commands ---
 
@@ -558,10 +643,12 @@ BOT_COMMANDS = [
     BotCommand("clear_rules", "Clear all learned rules"),
     BotCommand("facts", "View remembered personal facts"),
     BotCommand("clear", "Reset short-term conversation context"),
+    BotCommand("check_update", "Check for updates from GitHub repository"),
+    BotCommand("update", "Pull latest updates from GitHub and restart"),
 ]
 
 async def post_init_hook(application):
-    """Registers slash commands for both Private Chats and Group Chats, and starts scheduler."""
+    """Registers slash commands for both Private Chats and Group Chats, starts scheduler, and notifies on restart."""
     try:
         await application.bot.set_my_commands(BOT_COMMANDS, scope=BotCommandScopeAllPrivateChats())
         await application.bot.set_my_commands(BOT_COMMANDS, scope=BotCommandScopeAllGroupChats())
@@ -578,11 +665,37 @@ async def post_init_hook(application):
     scheduler.start()
     application.bot_data["scheduler"] = scheduler
 
+    # Notify admin if this startup was triggered by an applied update
+    if os.environ.get("_ALREADY_UPDATED") == "1":
+        os.environ.pop("_ALREADY_UPDATED", None)
+        admin_id = config.settings.get_admin_chat_id()
+        if admin_id:
+            try:
+                commit_hash, commit_msg = get_current_commit_info()
+                await application.bot.send_message(
+                    chat_id=admin_id,
+                    text=(
+                        f"🚀 **Bot restarted with latest updates!**\n\n"
+                        f"📌 **Commit:** `{commit_hash}`\n"
+                        f"📝 **Message:** _{commit_msg}_\n\n"
+                        f"All systems are online and operational."
+                    ),
+                    parse_mode=constants.ParseMode.MARKDOWN,
+                )
+                logger.info("Sent update restart notification to admin chat.")
+            except Exception as e:
+                logger.warning(f"Failed to send update restart notification: {e}")
+
 def main():
     try:
         config.settings.validate_for_bot()
     except Exception as e:
         print(f"❌ Configuration Error: {e}")
+        return
+
+    # Check for repository updates upon startup / restart
+    if check_and_apply_update_on_startup(config.settings):
+        # Process was replaced in-place via restart_bot_process()
         return
 
     print("🚀 Initializing Ultra-Fast Telegram Multimodal Assistant & VPS Manager...")
@@ -607,6 +720,10 @@ def main():
     app.add_handler(CommandHandler("docker", docker_command))
     app.add_handler(CommandHandler("mltb_logs", mltb_logs_command))
     app.add_handler(CommandHandler("mltb_restart", mltb_restart_command))
+
+    # Maintenance & Update commands
+    app.add_handler(CommandHandler("check_update", check_update_command))
+    app.add_handler(CommandHandler("update", update_command))
 
     # Reporting & Backup commands
     app.add_handler(CommandHandler("report", report_command))
@@ -635,6 +752,7 @@ def main():
     print(f"✅ Bot is listening! Active model: '{config.MODEL_NAME}'")
     print("📊 Automated daily reports (/report) & memory backups (/backup) enabled!")
     print("👥 Group Control Room mode active: Bot listens when mentioned or replied to.")
+    print("🔄 Auto-updater active on startup / restart and commands /check_update & /update.")
     app.run_polling()
 
 if __name__ == "__main__":
