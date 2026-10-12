@@ -49,3 +49,10 @@ def test_load_settings_from_env(monkeypatch, tmp_path):
     assert loaded.model_name == "gemini-test"
     assert loaded.allowed_user_ids == (1001, 1002)
     assert loaded.data_dir.exists()
+
+def test_admin_chat_id_group_negative(monkeypatch):
+    # Telegram supergroups have negative IDs, e.g. -1001234567890
+    monkeypatch.setenv("ADMIN_CHAT_ID", "-1001234567890")
+    s = load_settings_from_env()
+    assert s.admin_chat_id == -1001234567890
+    assert s.get_admin_chat_id() == -1001234567890

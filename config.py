@@ -89,7 +89,12 @@ def load_settings_from_env() -> Settings:
 
     raw_ids = os.getenv("ALLOWED_USER_IDS", "").strip()
     raw_admin = os.getenv("ADMIN_CHAT_ID", "").strip()
-    admin_id = int(raw_admin) if raw_admin.isdigit() else None
+    admin_id = None
+    if raw_admin:
+        try:
+            admin_id = int(raw_admin)
+        except ValueError:
+            admin_id = None
 
     daily_hour = int(os.getenv("DAILY_REPORT_HOUR", "8").strip() or 8)
     enable_report = os.getenv("ENABLE_DAILY_REPORT", "true").lower() in ("true", "1", "yes")
