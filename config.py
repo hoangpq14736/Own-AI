@@ -36,6 +36,7 @@ class Settings(BaseModel):
     auto_update_on_restart: bool = Field(default=True)
     git_branch: str = Field(default="main")
     git_repo_url: str = Field(default="https://github.com/hoangpq14736/Own-AI.git")
+    enable_group_free_chat: bool = Field(default=False)
 
     model_config = {
         "frozen": True,
@@ -105,6 +106,7 @@ def load_settings_from_env() -> Settings:
     auto_update = os.getenv("AUTO_UPDATE_ON_RESTART", "true").lower() in ("true", "1", "yes")
     git_branch = os.getenv("GIT_BRANCH", "main").strip() or "main"
     git_repo_url = os.getenv("GIT_REPO_URL", "https://github.com/hoangpq14736/Own-AI.git").strip()
+    enable_group_free = os.getenv("ENABLE_GROUP_FREE_CHAT", "false").lower() in ("true", "1", "yes")
 
     return Settings(
         gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
@@ -121,6 +123,7 @@ def load_settings_from_env() -> Settings:
         auto_update_on_restart=auto_update,
         git_branch=git_branch,
         git_repo_url=git_repo_url,
+        enable_group_free_chat=enable_group_free,
     )
 
 
@@ -138,3 +141,4 @@ ALLOWED_USER_IDS = list(settings.allowed_user_ids)
 ADMIN_CHAT_ID = settings.get_admin_chat_id()
 AUTO_UPDATE_ON_RESTART = settings.auto_update_on_restart
 GIT_BRANCH = settings.git_branch
+ENABLE_GROUP_FREE_CHAT = settings.enable_group_free_chat

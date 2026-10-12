@@ -54,6 +54,24 @@ def test_is_message_targeted_at_bot_group_chat():
         is_reply_to_bot=True
     ) is True
 
+    # Admin / Control Room Chat without mention -> True
+    assert is_message_targeted_at_bot(
+        chat_type="supergroup",
+        text="leech this file for me https://example.com/test",
+        bot_username=bot_user,
+        is_reply_to_bot=False,
+        is_admin_chat=True,
+    ) is True
+
+    # Free Chat Mode in groups without mention -> True
+    assert is_message_targeted_at_bot(
+        chat_type="group",
+        text="can you reply?",
+        bot_username=bot_user,
+        is_reply_to_bot=False,
+        enable_free_chat=True,
+    ) is True
+
     # Empty text/caption without reply -> False
     assert is_message_targeted_at_bot(
         chat_type="supergroup",

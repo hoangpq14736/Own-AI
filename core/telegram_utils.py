@@ -29,21 +29,28 @@ def is_message_targeted_at_bot(
     text: Optional[str] = None,
     caption: Optional[str] = None,
     bot_username: Optional[str] = None,
-    is_reply_to_bot: bool = False
+    is_reply_to_bot: bool = False,
+    is_admin_chat: bool = False,
+    enable_free_chat: bool = False,
 ) -> bool:
     """
     Determines if a message is intended for the bot:
     - In private chats: ALWAYS True.
-    - In group / supergroup chats: True ONLY IF:
+    - In Admin / Control Room chat (is_admin_chat): ALWAYS True.
+    - If free chat is enabled (enable_free_chat): ALWAYS True.
+    - In group / supergroup chats: True IF:
       1. It is a direct reply to one of the bot's messages, OR
-      2. The message text or caption explicitly mentions @bot_username, OR
-      3. It starts with a slash command directed at the bot.
+      2. The message text or caption explicitly mentions @bot_username.
     """
     # Private 1-on-1 chats are always targeted
     if chat_type in ("private", "sender"):
         return True
 
-    # In groups/channels:
+    # In Control Room group or when free chat mode is enabled
+    if is_admin_chat or enable_free_chat:
+        return True
+
+    # In groups/channels when replying directly to the bot
     if is_reply_to_bot:
         return True
 

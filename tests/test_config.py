@@ -56,3 +56,8 @@ def test_admin_chat_id_group_negative(monkeypatch):
     s = load_settings_from_env()
     assert s.admin_chat_id == -1001234567890
     assert s.get_admin_chat_id() == -1001234567890
+
+def test_enable_group_free_chat(monkeypatch):
+    monkeypatch.setenv("ENABLE_GROUP_FREE_CHAT", "true")
+    s = load_settings_from_env()
+    assert s.enable_group_free_chat is True

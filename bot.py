@@ -511,6 +511,10 @@ async def handle_multimodal_message(
         update.message.reply_to_message.from_user.id == context.bot.id
     )
     bot_username = context.bot.username
+    is_admin_chat = bool(
+        config.ADMIN_CHAT_ID is not None and
+        update.effective_chat.id == config.ADMIN_CHAT_ID
+    )
 
     # In groups: ignore noise unless message is targeted to the bot
     if not is_message_targeted_at_bot(
@@ -518,7 +522,9 @@ async def handle_multimodal_message(
         text=prompt_text,
         caption=update.message.caption,
         bot_username=bot_username,
-        is_reply_to_bot=is_reply
+        is_reply_to_bot=is_reply,
+        is_admin_chat=is_admin_chat,
+        enable_free_chat=config.settings.enable_group_free_chat,
     ):
         return
 
