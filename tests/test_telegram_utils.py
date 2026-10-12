@@ -4,6 +4,8 @@ from core.telegram_utils import (
     is_message_targeted_at_bot,
     can_user_execute_command,
     extract_mltb_command,
+    send_safe_response,
+    safe_edit_text,
 )
 
 def test_strip_bot_mention():
@@ -132,3 +134,89 @@ def test_extract_mltb_command_from_user_prompt():
     # User prompt without media reply
     prompt4 = "leech this picture for me"
     assert extract_mltb_command(user_prompt=prompt4, has_reply_media=False) is None
+
+
+class MockMessage:
+    def __init__(self, fail_markdown: bool = False, fail_all: bool = False):
+        self.reply_calls = []
+        self.edit_calls = []
+        self.fail_markdown = fail_markdown
+        self.fail_all = fail_all
+
+    async def reply_text(self, text, parse_mode=None):
+        if self.fail_all:
+            raise RuntimeError("Telegram network failure")
+        if self.fail_markdown and parse_mode:
+            raise ValueError("Can't parse entities")
+        self.reply_calls.append((text, parse_mode))
+        return self
+
+    async def edit_text(self, text, parse_mode=None):
+        if self.fail_all:
+            raise RuntimeError("Telegram network failure")
+        if self.fail_markdown and parse_mode:
+            raise ValueError("Can't parse entities")
+        self.edit_calls.append((text, parse_mode))
+        return self
+
+
+@pytest.mark.anyio
+async def test_send_safe_response_success():
+    msg = MockMessage()
+    await send_safe_response(msg, "Hello *world*")
+    assert len(msg.reply_calls) == 1
+    assert msg.reply_calls[0] == ("Hello *world*", "Markdown")
+
+
+@pytest.mark.anyio
+async def test_send_safe_response_empty_text():
+    msg = MockMessage()
+    await send_safe_response(msg, "")
+    assert len(msg.reply_calls) == 1
+    assert msg.reply_calls[0] == ("I received an empty response.", "Markdown")
+
+
+@pytest.mark.anyio
+async def test_send_safe_response_markdown_failure_fallback():
+    msg = MockMessage(fail_markdown=True)
+    await send_safe_response(msg, "Broken *markdown")
+    # First attempt with Markdown fails, falls back to plain text
+    assert len(msg.reply_calls) == 1
+    assert msg.reply_calls[0] == ("Broken *markdown", None)
+
+
+@pytest.mark.anyio
+async def test_send_safe_response_long_chunks():
+    msg = MockMessage()
+    long_text = "A" * 9000
+    await send_safe_response(msg, long_text)
+    assert len(msg.reply_calls) == 3
+    assert len(msg.reply_calls[0][0]) == 4000
+    assert len(msg.reply_calls[1][0]) == 4000
+    assert len(msg.reply_calls[2][0]) == 1000
+
+
+@pytest.mark.anyio
+async def test_safe_edit_text_success():
+    msg = MockMessage()
+    res = await safe_edit_text(msg, "Updated *status*")
+    assert res is msg
+    assert len(msg.edit_calls) == 1
+    assert msg.edit_calls[0] == ("Updated *status*", "Markdown")
+
+
+@pytest.mark.anyio
+async def test_safe_edit_text_markdown_failure_fallback():
+    msg = MockMessage(fail_markdown=True)
+    res = await safe_edit_text(msg, "Broken *status text_without_end")
+    assert res is msg
+    assert len(msg.edit_calls) == 1
+    assert msg.edit_calls[0] == ("Broken *status text_without_end", None)
+
+
+@pytest.mark.anyio
+async def test_safe_edit_text_total_failure_raises():
+    msg = MockMessage(fail_all=True)
+    with pytest.raises(RuntimeError, match="Telegram network failure"):
+        await safe_edit_text(msg, "Any text")
+

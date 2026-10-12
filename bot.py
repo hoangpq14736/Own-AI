@@ -31,8 +31,13 @@ from core.vps_manager import (
     get_mltb_logs,
     restart_mltb_container,
 )
-from core.scheduler import SchedulerService, create_daily_health_report, create_memory_backup
-from core.telegram_utils import strip_bot_mention, is_message_targeted_at_bot, extract_mltb_command
+from core.telegram_utils import (
+    strip_bot_mention,
+    is_message_targeted_at_bot,
+    extract_mltb_command,
+    send_safe_response,
+    safe_edit_text,
+)
 from core.updater import (
     check_for_updates,
     apply_update,
@@ -57,24 +62,6 @@ def is_authorized(user_id: int) -> bool:
     if not config.ALLOWED_USER_IDS:
         return True
     return user_id in config.ALLOWED_USER_IDS
-
-async def send_safe_response(message, text: str):
-    """
-    Safely delivers text to Telegram:
-    1. Splits messages longer than 4000 characters to prevent Telegram API crashes.
-    2. Gracefully falls back to plain text if Markdown entities fail to parse.
-    """
-    if not text:
-        text = "I received an empty response."
-
-    chunk_size = 4000
-    chunks = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
-
-    for chunk in chunks:
-        try:
-            await message.reply_text(chunk, parse_mode=constants.ParseMode.MARKDOWN)
-        except Exception:
-            await message.reply_text(chunk)
 
 # --- Error Handler ---
 
@@ -155,7 +142,7 @@ async def backup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     backup_res = create_memory_backup(config.DB_PATH)
 
     if not backup_res.success:
-        await status_msg.edit_text(f"❌ Backup failed: `{backup_res.error}`")
+        await safe_edit_text(status_msg, f"❌ Backup failed: {backup_res.error}")
         return
 
     backup_path = Path(backup_res.db_path)
@@ -174,7 +161,7 @@ async def backup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.delete()
     except Exception as e:
         logger.error(f"Failed to transmit backup file: {e}")
-        await status_msg.edit_text(f"❌ Failed to send backup document: {e}")
+        await safe_edit_text(status_msg, f"❌ Failed to send backup document: {e}")
 
 # --- VPS & MLTB Management Commands ---
 
@@ -217,7 +204,7 @@ async def mltb_restart_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
     status_msg = await update.message.reply_text("🔄 Sending restart signal to `mirrorbot-app-1`...")
     text = restart_mltb_container(container_name="mirrorbot-app-1")
-    await status_msg.edit_text(text, parse_mode=constants.ParseMode.MARKDOWN)
+    await safe_edit_text(status_msg, text)
 
 # --- Repository Update & Maintenance Commands ---
 
@@ -236,27 +223,30 @@ async def check_update_command(update: Update, context: ContextTypes.DEFAULT_TYP
         if len(info.commits_behind) > 5:
             commits_preview += f"\n... and {len(info.commits_behind) - 5} more commit(s)"
         text = (
-            f"🔄 **Update Available!**\n\n"
-            f"• **Current Version:** `{info.current_commit}`\n"
-            f"• **Latest Version:** `{info.latest_commit}` - _{info.latest_commit_message}_\n"
-            f"• **Commits Behind:** {info.behind_count}\n\n"
-            f"**Recent Commits:**\n{commits_preview}\n\n"
+            f"🔄 *Update Available!*\n\n"
+            f"• *Current Version:* `{info.current_commit}`\n"
+            f"• *Latest Version:* `{info.latest_commit}`\n"
+            f"• *Commit:* {info.latest_commit_message}\n"
+            f"• *Commits Behind:* {info.behind_count}\n\n"
+            f"*Recent Commits:*\n{commits_preview}\n\n"
             f"👉 Send `/update` to pull changes and restart the bot."
         )
     elif info.error:
         text = (
-            f"⚠️ **Could not check for updates:**\n`{info.error}`\n\n"
-            f"• Current version: `{info.current_commit}` - _{info.current_commit_message}_"
+            f"⚠️ *Could not check for updates:*\n"
+            f"{info.error}\n\n"
+            f"• *Current version:* `{info.current_commit}`\n"
+            f"• *Commit message:* {info.current_commit_message}"
         )
     else:
         text = (
-            f"✅ **Bot is up to date!**\n\n"
-            f"• **Running Commit:** `{info.current_commit}`\n"
-            f"• **Message:** _{info.current_commit_message}_\n"
-            f"• **Branch:** `{config.GIT_BRANCH}`"
+            f"✅ *Bot is up to date!*\n\n"
+            f"• *Running Commit:* `{info.current_commit}`\n"
+            f"• *Message:* {info.current_commit_message}\n"
+            f"• *Branch:* `{config.GIT_BRANCH}`"
         )
 
-    await status_msg.edit_text(text, parse_mode=constants.ParseMode.MARKDOWN)
+    await safe_edit_text(status_msg, text)
 
 async def update_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Pulls latest updates from GitHub and restarts the bot process."""
@@ -269,25 +259,25 @@ async def update_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     info = check_for_updates(branch=config.GIT_BRANCH)
 
     if not info.has_update and not info.error:
-        await status_msg.edit_text(
+        await safe_edit_text(
+            status_msg,
             f"✅ Bot is already running the latest commit (`{info.current_commit}`). No update needed.",
-            parse_mode=constants.ParseMode.MARKDOWN,
         )
         return
 
-    await status_msg.edit_text("📥 Pulling latest code and verifying dependencies...")
+    await safe_edit_text(status_msg, "📥 Pulling latest code and verifying dependencies...")
     success, msg = apply_update(branch=config.GIT_BRANCH)
 
     if not success:
-        await status_msg.edit_text(
-            f"❌ **Update Failed:**\n`{msg}`\n\nPlease check git status or VPS permissions.",
-            parse_mode=constants.ParseMode.MARKDOWN,
+        await safe_edit_text(
+            status_msg,
+            f"❌ *Update Failed:*\n{msg}\n\nPlease check git status or VPS permissions.",
         )
         return
 
-    await status_msg.edit_text(
-        f"✅ **{msg}**\n\n🚀 Restarting bot now... I will be back online in a few seconds!",
-        parse_mode=constants.ParseMode.MARKDOWN,
+    await safe_edit_text(
+        status_msg,
+        f"✅ *{msg}*\n\n🚀 Restarting bot now... I will be back online in a few seconds!",
     )
     # Pause briefly to ensure Telegram sends the reply before process replacement
     await asyncio.sleep(1.0)
@@ -327,7 +317,7 @@ async def draw_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except TimedOut:
             logger.info("Upload timed out on client acknowledgment, photo delivered successfully.")
     else:
-        await status_msg.edit_text("❌ Failed to generate image with Google. Please try again.")
+        await safe_edit_text(status_msg, "❌ Failed to generate image with Google. Please try again.")
 
 async def video_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update.effective_user.id):
@@ -368,7 +358,7 @@ async def video_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
     else:
-        await status_msg.edit_text("❌ Failed to generate video with Google Veo. Please check your prompt or try again.")
+        await safe_edit_text(status_msg, "❌ Failed to generate video with Google Veo. Please check your prompt or try again.")
 
 async def speak_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update.effective_user.id):

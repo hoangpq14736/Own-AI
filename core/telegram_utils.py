@@ -3,8 +3,11 @@ Telegram Utilities for Group Chat and Control Room Management.
 Provides target filtering, mention stripping, and group authorization checks per ECC.
 """
 
+import logging
 import re
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Any
+
+logger = logging.getLogger(__name__)
 
 
 def strip_bot_mention(text: str, bot_username: Optional[str]) -> str:
@@ -139,3 +142,46 @@ def extract_mltb_command(
             return cmd
 
     return None
+
+
+async def send_safe_response(message: Any, text: str, parse_mode: Optional[str] = "Markdown") -> None:
+    """
+    Safely delivers text to Telegram:
+    1. Splits messages longer than 4000 characters to prevent Telegram API crashes.
+    2. Gracefully falls back to plain text if Markdown entities fail to parse.
+    """
+    if not text:
+        text = "I received an empty response."
+
+    chunk_size = 4000
+    chunks = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
+
+    for chunk in chunks:
+        try:
+            if parse_mode:
+                await message.reply_text(chunk, parse_mode=parse_mode)
+            else:
+                await message.reply_text(chunk)
+        except Exception:
+            await message.reply_text(chunk)
+
+
+async def safe_edit_text(message: Any, text: str, parse_mode: Optional[str] = "Markdown") -> Any:
+    """
+    Safely edits an existing Telegram message:
+    1. Attempts to edit with the specified parse_mode.
+    2. Gracefully falls back to plain text if Markdown entity parsing fails.
+    """
+    try:
+        if parse_mode:
+            return await message.edit_text(text, parse_mode=parse_mode)
+        else:
+            return await message.edit_text(text)
+    except Exception as e:
+        logger.warning(f"edit_text with parse_mode={parse_mode} failed ({e}); falling back to plain text.")
+        try:
+            return await message.edit_text(text)
+        except Exception as inner_e:
+            logger.error(f"Failed to edit message in plain text fallback: {inner_e}")
+            raise inner_e
+
