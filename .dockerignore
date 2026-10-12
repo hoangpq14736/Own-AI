@@ -1,0 +1,11 @@
+# Ignore virtual environment and temporary caches
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.git/
+.gitignore
+*.log
