@@ -79,3 +79,63 @@ def can_user_execute_command(
     if not allowed_user_ids:
         return True
     return user_id in allowed_user_ids
+
+
+def extract_mltb_command(
+    text: Optional[str] = None,
+    user_prompt: Optional[str] = None,
+    has_reply_media: bool = False,
+) -> Optional[str]:
+    """
+    Extracts or formats a raw MLTB command (/leech, /mirror, /clone, /ytdl)
+    from AI response or natural language user prompt.
+    Returns the exact command (e.g. '/leech https://...' or '/leech')
+    without markdown code blocks or introductory conversational filler.
+    """
+    # 1. Check if AI response contains an MLTB command
+    if text:
+        match = re.search(r"/(leech|mirror|clone|ytdl)\b[^\n\r`]*", text, re.IGNORECASE)
+        if match:
+            cmd = match.group(0).strip()
+            # Clean trailing backticks, quotes, or markdown
+            cmd = re.sub(r"[`\"']+$", "", cmd).strip()
+            return cmd
+
+    # 2. Check if user prompt is asking to leech a replied media
+    if user_prompt and has_reply_media:
+        prompt_lower = user_prompt.lower()
+        if re.search(r"\b(leech|tải|tai|down)\b", prompt_lower):
+            return "/leech"
+        if re.search(r"\b(mirror)\b", prompt_lower):
+            return "/mirror"
+
+    # 3. Check if user prompt contains a URL or magnet link with leech/mirror intent
+    if user_prompt:
+        url_match = re.search(r"(https?://\S+|magnet:\?\S+)", user_prompt)
+        if url_match:
+            url = url_match.group(1).rstrip(">)].,\"'")
+            prompt_lower = user_prompt.lower()
+
+            action = "/leech"
+            if re.search(r"\b(mirror)\b", prompt_lower):
+                action = "/mirror"
+            elif re.search(r"\b(clone)\b", prompt_lower):
+                action = "/clone"
+            elif re.search(r"\b(ytdl|youtube)\b", prompt_lower):
+                action = "/ytdl"
+
+            # Check common flags
+            flags = []
+            if "-z" in user_prompt or re.search(r"\bzip\b", prompt_lower):
+                flags.append("-z")
+            if "-uz" in user_prompt or re.search(r"\bunzip\b", prompt_lower):
+                flags.append("-uz")
+            if "-s" in user_prompt or re.search(r"\bselect\b", prompt_lower):
+                flags.append("-s")
+
+            cmd = f"{action} {url}"
+            if flags:
+                cmd += " " + " ".join(flags)
+            return cmd
+
+    return None

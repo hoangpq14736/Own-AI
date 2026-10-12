@@ -32,7 +32,7 @@ from core.vps_manager import (
     restart_mltb_container,
 )
 from core.scheduler import SchedulerService, create_daily_health_report, create_memory_backup
-from core.telegram_utils import strip_bot_mention, is_message_targeted_at_bot
+from core.telegram_utils import strip_bot_mention, is_message_targeted_at_bot, extract_mltb_command
 from core.updater import (
     check_for_updates,
     apply_update,
@@ -531,6 +531,31 @@ async def handle_multimodal_message(
     # Clean mention handle from user's prompt so Gemini receives clean text
     clean_prompt = strip_bot_mention(prompt_text, bot_username)
 
+    # 2b. Direct MLTB Leech / Mirror Command Dispatch
+    has_reply_media = bool(
+        update.message.reply_to_message and
+        (
+            update.message.reply_to_message.photo or
+            update.message.reply_to_message.document or
+            update.message.reply_to_message.video or
+            update.message.reply_to_message.audio or
+            update.message.reply_to_message.voice
+        )
+    )
+
+    direct_mltb = extract_mltb_command(user_prompt=clean_prompt, has_reply_media=has_reply_media)
+    if direct_mltb:
+        target_reply_id = update.message.reply_to_message.message_id if has_reply_media else None
+        logger.info(f"Directly dispatching MLTB command to chat: {direct_mltb}")
+        memory.add_history(user_id=user_id, role="user", content=clean_prompt, media_type=media_type)
+        memory.add_history(user_id=user_id, role="assistant", content=direct_mltb)
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=direct_mltb,
+            reply_to_message_id=target_reply_id
+        )
+        return
+
     # Typing indicator
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=constants.ChatAction.TYPING)
 
@@ -565,8 +590,10 @@ async def handle_multimodal_message(
         except Exception as e:
             logger.warning(f"Failed to delete local file {media_path}: {e}")
 
-    # 8. Deliver response
-    await send_safe_response(update.message, response)
+    # 8. Deliver response (if AI generated an MLTB command, output the raw command directly)
+    mltb_ai_cmd = extract_mltb_command(text=response)
+    final_response = mltb_ai_cmd if mltb_ai_cmd else response
+    await send_safe_response(update.message, final_response)
 
     # 9. Voice Reply if triggered by audio input
     if reply_with_voice:

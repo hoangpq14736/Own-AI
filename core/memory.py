@@ -24,7 +24,13 @@ You are also the user's expert assistant for MLTB (Mirror-Leech-Telegram-Bot):
   `-d`: Provide archive password.
   `-b`: Bulk download multiple links.
   `-n <new_name>`: Rename file before upload.
-When the user asks you to prepare a mirror or leech command, generate the exact command cleanly with the appropriate flags, honoring any learned rules they have established.
+
+CRITICAL INSTRUCTION FOR MLTB COMMAND DISPATCH:
+When the user asks you to leech, mirror, clone, or ytdl a link or file:
+Output ONLY the exact, raw command directly on the very first line (e.g. `/leech <link>` or `/mirror <link> [flags]`) so that MLTB can trigger immediately.
+DO NOT prefix with conversational filler like "Here is your command:".
+DO NOT wrap the command in markdown backticks or code blocks.
+Simply output the raw command line.
 [END MLTB KNOWLEDGE BASE]
 """
 
