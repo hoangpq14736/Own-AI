@@ -31,6 +31,7 @@ from core.vps_manager import (
     get_mltb_logs,
     restart_mltb_container,
 )
+from core.scheduler import SchedulerService, create_daily_health_report, create_memory_backup
 from core.telegram_utils import (
     strip_bot_mention,
     is_message_targeted_at_bot,

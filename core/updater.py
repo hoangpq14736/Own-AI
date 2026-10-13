@@ -28,7 +28,7 @@ def _git_env() -> dict:
 
 def _build_git_cmd(args: list) -> list:
     """Builds git command with optional GitHub token authorization header."""
-    cmd = ["git"]
+    cmd = ["git", "-c", "credential.helper="]
     token = getattr(config.settings, "github_token", "").strip()
     if token:
         cmd.extend(["-c", f"http.extraHeader=Authorization: token {token}"])
@@ -195,7 +195,7 @@ def check_for_updates(
             err_msg = "Repository is Private. Make it Public on GitHub or add GITHUB_TOKEN to your .env file."
         else:
             err_msg = f"Git error: {raw_err}"
-        logger.warning(err_msg)
+        logger.warning(f"{err_msg} (detail: {raw_err})")
         curr_hash, curr_msg = get_current_commit_info(base_dir)
         return UpdateInfo(
             current_commit=curr_hash,
