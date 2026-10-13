@@ -5,7 +5,7 @@ Implements schema-based boundary validation and immutability according to ECC st
 
 import os
 from pathlib import Path
-from typing import Tuple, List, Optional
+from typing import Tuple, List, Optional, Union
 from pydantic import BaseModel, Field, field_validator
 from dotenv import load_dotenv
 
@@ -41,6 +41,7 @@ class Settings(BaseModel):
     telegram_api_id: Optional[int] = Field(default=None)
     telegram_api_hash: str = Field(default="")
     telegram_user_session: str = Field(default="")
+    mltb_target_chat: Optional[Union[int, str]] = Field(default=None)
 
     model_config = {
         "frozen": True,
@@ -117,6 +118,14 @@ def load_settings_from_env() -> Settings:
     api_hash = os.getenv("TELEGRAM_API_HASH", os.getenv("API_HASH", "")).strip()
     user_session = os.getenv("TELEGRAM_USER_SESSION", os.getenv("USER_SESSION_STRING", "")).strip()
 
+    raw_mltb_target = os.getenv("MLTB_TARGET_CHAT", "").strip()
+    mltb_target = None
+    if raw_mltb_target:
+        try:
+            mltb_target = int(raw_mltb_target)
+        except ValueError:
+            mltb_target = raw_mltb_target if raw_mltb_target.startswith("@") else f"@{raw_mltb_target}"
+
     return Settings(
         gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", "").strip(),
@@ -137,6 +146,7 @@ def load_settings_from_env() -> Settings:
         telegram_api_id=api_id,
         telegram_api_hash=api_hash,
         telegram_user_session=user_session,
+        mltb_target_chat=mltb_target,
     )
 
 
@@ -159,3 +169,4 @@ GITHUB_TOKEN = settings.github_token
 TELEGRAM_API_ID = settings.telegram_api_id
 TELEGRAM_API_HASH = settings.telegram_api_hash
 TELEGRAM_USER_SESSION = settings.telegram_user_session
+MLTB_TARGET_CHAT = settings.mltb_target_chat

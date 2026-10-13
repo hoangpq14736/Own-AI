@@ -144,6 +144,28 @@ def extract_mltb_command(
     return None
 
 
+def resolve_mltb_target(
+    current_chat_id: int,
+    chat_type: str,
+    mltb_target: Optional[Any] = None,
+    admin_chat_id: Optional[int] = None,
+) -> Optional[Any]:
+    """
+    Determines where to dispatch an MLTB command:
+    1. If explicit mltb_target is set (e.g. '@my_leech_bot' or specific chat ID), always use it.
+    2. If chatting in private chat, route to admin_chat_id (Control Room group) if configured.
+    3. If in group chat, use the current group chat ID.
+    """
+    if mltb_target:
+        return mltb_target
+    if chat_type in ("private", "sender"):
+        if admin_chat_id:
+            return admin_chat_id
+    if chat_type in ("group", "supergroup", "channel"):
+        return current_chat_id
+    return admin_chat_id or current_chat_id
+
+
 async def send_safe_response(message: Any, text: str, parse_mode: Optional[str] = "Markdown") -> None:
     """
     Safely delivers text to Telegram:

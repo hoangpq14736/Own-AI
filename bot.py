@@ -38,6 +38,7 @@ from core.telegram_utils import (
     extract_mltb_command,
     send_safe_response,
     safe_edit_text,
+    resolve_mltb_target,
 )
 from core.updater import (
     check_for_updates,
@@ -301,11 +302,13 @@ async def userbot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if userbot.is_connected:
         user_handle = f"@{userbot.username}" if userbot.username else f"User ID: `{userbot.user_id}`"
+        target_info = f"`{config.settings.mltb_target_chat}`" if config.settings.mltb_target_chat else "Control Room group"
         text = (
             f"⚡ *Userbot is Connected & Active!*\n\n"
             f"• *Account:* {user_handle}\n"
-            f"• *Status:* Online & ready to auto-dispatch MLTB commands\n\n"
-            f"Whenever you ask to leech or mirror in the group, I will send `/leech` as your account so MLTB activates automatically!"
+            f"• *Status:* Online & ready to auto-dispatch MLTB commands\n"
+            f"• *Dispatch Destination:* {target_info}\n\n"
+            f"💡 *Tip:* You can chat with me in private, and I will automatically dispatch `/leech` or `/ytdl` to MLTB without double messages in the group!"
         )
     elif userbot.is_configured:
         text = (
@@ -318,7 +321,8 @@ async def userbot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"To enable 100% hands-free MLTB dispatching:\n"
             f"1. Run `python scripts/generate_session.py` on your PC or VPS.\n"
             f"2. Add `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, and `TELEGRAM_USER_SESSION` to `.env`.\n"
-            f"3. Restart the bot (`docker compose restart ai-supervisor`)!\n\n"
+            f"3. Optionally set `MLTB_TARGET_CHAT=@YourMLTBBot` to send directly to MLTB's inbox!\n"
+            f"4. Restart the bot (`docker compose restart ai-supervisor`)!\n\n"
             f"*(In the meantime, I will give you 1-tap copy boxes for all leech commands).* "
         )
     await send_safe_response(update.message, text)
@@ -575,20 +579,32 @@ async def handle_multimodal_message(
 
     direct_mltb = extract_mltb_command(user_prompt=clean_prompt, has_reply_media=has_reply_media)
     if direct_mltb:
-        target_reply_id = update.message.reply_to_message.message_id if has_reply_media else None
         logger.info(f"MLTB command requested: {direct_mltb}")
         memory.add_history(user_id=user_id, role="user", content=clean_prompt, media_type=media_type)
         memory.add_history(user_id=user_id, role="assistant", content=direct_mltb)
 
-        if userbot.is_connected:
+        target_chat = resolve_mltb_target(
+            current_chat_id=update.effective_chat.id,
+            chat_type=chat_type,
+            mltb_target=config.settings.mltb_target_chat,
+            admin_chat_id=config.settings.get_admin_chat_id(),
+        )
+
+        if userbot.is_connected and target_chat:
+            target_reply_id = update.message.reply_to_message.message_id if (has_reply_media and target_chat == update.effective_chat.id) else None
             dispatched = await userbot.send_command(
-                chat_id=update.effective_chat.id,
+                chat_id=target_chat,
                 command=direct_mltb,
                 reply_to_msg_id=target_reply_id,
             )
             if dispatched:
+                dest_name = f"@{str(target_chat).lstrip('@')}" if str(target_chat).startswith("@") else "Control Room"
+                if target_chat == update.effective_chat.id:
+                    msg_text = f"⚡ *Auto-dispatched to MLTB:*\n`{direct_mltb}`\n\n*(Sent via your user account)*"
+                else:
+                    msg_text = f"⚡ *Auto-dispatched to MLTB ({dest_name}):*\n`{direct_mltb}`\n\n*(Sent via your user account to {dest_name})*"
                 await update.message.reply_text(
-                    f"⚡ *Auto-dispatched to MLTB:*\n`{direct_mltb}`\n\n*(Sent via your user account)*",
+                    msg_text,
                     parse_mode=constants.ParseMode.MARKDOWN,
                 )
                 return
@@ -637,15 +653,27 @@ async def handle_multimodal_message(
     # 8. Deliver response
     mltb_ai_cmd = extract_mltb_command(text=response)
     if mltb_ai_cmd:
-        if userbot.is_connected:
+        target_chat = resolve_mltb_target(
+            current_chat_id=update.effective_chat.id,
+            chat_type=chat_type,
+            mltb_target=config.settings.mltb_target_chat,
+            admin_chat_id=config.settings.get_admin_chat_id(),
+        )
+        if userbot.is_connected and target_chat:
+            reply_id = update.message.message_id if target_chat == update.effective_chat.id else None
             dispatched = await userbot.send_command(
-                chat_id=update.effective_chat.id,
+                chat_id=target_chat,
                 command=mltb_ai_cmd,
-                reply_to_msg_id=update.message.message_id,
+                reply_to_msg_id=reply_id,
             )
             if dispatched:
+                dest_name = f"@{str(target_chat).lstrip('@')}" if str(target_chat).startswith("@") else "Control Room"
+                if target_chat == update.effective_chat.id:
+                    msg_text = f"⚡ *Auto-dispatched to MLTB:*\n`{mltb_ai_cmd}`\n\n*(Sent via your user account)*"
+                else:
+                    msg_text = f"⚡ *Auto-dispatched to MLTB ({dest_name}):*\n`{mltb_ai_cmd}`\n\n*(Sent via your user account to {dest_name})*"
                 await update.message.reply_text(
-                    f"⚡ *Auto-dispatched to MLTB:*\n`{mltb_ai_cmd}`\n\n*(Sent via your user account)*",
+                    msg_text,
                     parse_mode=constants.ParseMode.MARKDOWN,
                 )
             else:

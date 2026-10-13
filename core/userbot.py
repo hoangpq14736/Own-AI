@@ -118,7 +118,7 @@ class UserbotClient:
 
     async def send_command(
         self,
-        chat_id: int,
+        chat_id: Any,
         command: str,
         reply_to_msg_id: Optional[int] = None,
     ) -> bool:

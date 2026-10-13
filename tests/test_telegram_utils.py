@@ -6,6 +6,7 @@ from core.telegram_utils import (
     extract_mltb_command,
     send_safe_response,
     safe_edit_text,
+    resolve_mltb_target,
 )
 
 def test_strip_bot_mention():
@@ -134,6 +135,23 @@ def test_extract_mltb_command_from_user_prompt():
     # User prompt without media reply
     prompt4 = "leech this picture for me"
     assert extract_mltb_command(user_prompt=prompt4, has_reply_media=False) is None
+
+
+def test_resolve_mltb_target():
+    # 1. Explicit MLTB target always takes precedence
+    assert resolve_mltb_target(current_chat_id=123, chat_type="private", mltb_target="@my_mltb_bot", admin_chat_id=-100) == "@my_mltb_bot"
+    assert resolve_mltb_target(current_chat_id=123, chat_type="supergroup", mltb_target=-100999, admin_chat_id=-100) == -100999
+
+    # 2. In private chat without explicit mltb_target, route to admin_chat_id
+    assert resolve_mltb_target(current_chat_id=123, chat_type="private", mltb_target=None, admin_chat_id=-100555) == -100555
+    assert resolve_mltb_target(current_chat_id=123, chat_type="sender", mltb_target=None, admin_chat_id=-100555) == -100555
+
+    # 3. In group chat without explicit mltb_target, stay in current group
+    assert resolve_mltb_target(current_chat_id=-100888, chat_type="group", mltb_target=None, admin_chat_id=-100555) == -100888
+    assert resolve_mltb_target(current_chat_id=-100888, chat_type="supergroup", mltb_target=None, admin_chat_id=-100555) == -100888
+
+    # 4. Fallback if no admin_chat_id
+    assert resolve_mltb_target(current_chat_id=123, chat_type="private", mltb_target=None, admin_chat_id=None) == 123
 
 
 class MockMessage:
