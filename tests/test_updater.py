@@ -16,6 +16,9 @@ from core.updater import (
     apply_update,
     check_and_apply_update_on_startup,
     restart_bot_process,
+    _clean_git_remote_url,
+    _run_git_cmd_with_fallback,
+    _build_git_cmd,
 )
 from config import Settings
 
@@ -338,3 +341,100 @@ class TestUpdaterEdgeCases:
         success, msg = apply_update()
         assert success is False
         assert "Private" in msg
+
+
+class TestUpdaterFallbackAndSanitization:
+    def test_build_git_cmd_token_options(self, monkeypatch):
+        import config
+        patched = config.settings.model_copy(update={"github_token": "ghp_mock_token"})
+        monkeypatch.setattr(config, "settings", patched)
+        with_token = _build_git_cmd(["fetch"], use_token=True)
+        assert any("Authorization: token ghp_mock_token" in arg for arg in with_token)
+
+        without_token = _build_git_cmd(["fetch"], use_token=False)
+        assert not any("Authorization" in arg for arg in without_token)
+
+    @patch("subprocess.run")
+    def test_clean_git_remote_url_with_embedded_token(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="https://ghp_secret@github.com/hoangpq14736/Own-AI.git\n"),
+            MagicMock(returncode=0, stdout=""),
+        ]
+        cleaned = _clean_git_remote_url(Path("/test/repo"), "origin")
+        assert cleaned is True
+        assert mock_run.call_count == 2
+        set_url_call = mock_run.call_args_list[1][0][0]
+        assert set_url_call == [
+            "git", "remote", "set-url", "origin", "https://github.com/hoangpq14736/Own-AI.git"
+        ]
+
+    @patch("subprocess.run")
+    def test_clean_git_remote_url_already_clean(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="https://github.com/hoangpq14736/Own-AI.git\n")
+        cleaned = _clean_git_remote_url(Path("/test/repo"), "origin")
+        assert cleaned is False
+        assert mock_run.call_count == 1
+
+    @patch("subprocess.run")
+    def test_clean_git_remote_url_handles_exception(self, mock_run):
+        mock_run.side_effect = subprocess.CalledProcessError(1, ["git"])
+        cleaned = _clean_git_remote_url(Path("/test/repo"), "origin")
+        assert cleaned is False
+
+    @patch("subprocess.run")
+    def test_run_git_cmd_fallback_with_token_succeeds_anonymously(self, mock_run, monkeypatch):
+        import config
+        patched = config.settings.model_copy(update={"github_token": "ghp_bad_token"})
+        monkeypatch.setattr(config, "settings", patched)
+
+        # 1st call (with token) fails with 401/auth failure
+        # 2nd call (_clean_git_remote_url -> get-url) returns clean url
+        # 3rd call (anonymous fetch) succeeds
+        mock_run.side_effect = [
+            subprocess.CalledProcessError(128, ["git"], stderr="fatal: Authentication failed for 'https://github.com'"),
+            MagicMock(returncode=0, stdout="https://github.com/hoangpq14736/Own-AI.git\n"),
+            MagicMock(returncode=0, stdout="Success"),
+        ]
+
+        res = _run_git_cmd_with_fallback(["fetch", "origin", "main"], Path("/test/repo"))
+        assert res.returncode == 0
+        assert res.stdout == "Success"
+
+    @patch("subprocess.run")
+    def test_run_git_cmd_fallback_with_token_both_fail_raises(self, mock_run, monkeypatch):
+        import config
+        patched = config.settings.model_copy(update={"github_token": "ghp_bad_token"})
+        monkeypatch.setattr(config, "settings", patched)
+
+        # 1st call fails
+        # 2nd call (_clean_git_remote_url get-url) returns clean url
+        # 3rd call (anonymous) fails with private repo error
+        mock_run.side_effect = [
+            subprocess.CalledProcessError(128, ["git"], stderr="fatal: could not read Username"),
+            MagicMock(returncode=0, stdout="https://github.com/hoangpq14736/Own-AI.git\n"),
+            subprocess.CalledProcessError(128, ["git"], stderr="fatal: could not read Username"),
+        ]
+
+        with pytest.raises(subprocess.CalledProcessError):
+            _run_git_cmd_with_fallback(["fetch", "origin", "main"], Path("/test/repo"))
+
+    @patch("subprocess.run")
+    def test_run_git_cmd_no_token_auth_fail_cleans_dirty_remote_and_succeeds(self, mock_run, monkeypatch):
+        import config
+        patched = config.settings.model_copy(update={"github_token": ""})
+        monkeypatch.setattr(config, "settings", patched)
+
+        # 1st call fails with auth failure due to embedded dirty remote URL
+        # 2nd call (get-url) returns dirty url
+        # 3rd call (set-url) succeeds
+        # 4th call (retry anonymous) succeeds
+        mock_run.side_effect = [
+            subprocess.CalledProcessError(128, ["git"], stderr="fatal: could not read Username: terminal prompts disabled"),
+            MagicMock(returncode=0, stdout="https://oldtoken@github.com/hoangpq14736/Own-AI.git\n"),
+            MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=0, stdout="Success after cleaning remote"),
+        ]
+
+        res = _run_git_cmd_with_fallback(["fetch", "origin", "main"], Path("/test/repo"))
+        assert res.returncode == 0
+        assert res.stdout == "Success after cleaning remote"
