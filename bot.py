@@ -46,6 +46,7 @@ from core.updater import (
     check_and_apply_update_on_startup,
     get_current_commit_info,
 )
+from core.userbot import UserbotClient
 
 # Setup Logging
 logging.basicConfig(
@@ -58,6 +59,11 @@ logger = logging.getLogger(__name__)
 memory = MemoryEngine(config.DB_PATH)
 gemini = GeminiClient(api_key=config.GEMINI_API_KEY, model_name=config.MODEL_NAME)
 reflector = Reflector(gemini_client=gemini, memory_engine=memory)
+userbot = UserbotClient(
+    api_id=config.TELEGRAM_API_ID,
+    api_hash=config.TELEGRAM_API_HASH,
+    session_string=config.TELEGRAM_USER_SESSION,
+)
 
 def is_authorized(user_id: int) -> bool:
     if not config.ALLOWED_USER_IDS:
@@ -283,6 +289,39 @@ async def update_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Pause briefly to ensure Telegram sends the reply before process replacement
     await asyncio.sleep(1.0)
     restart_bot_process()
+
+# --- Userbot Status Command ---
+
+async def userbot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Reports Userbot helper status or explains how to configure it."""
+    if not is_authorized(update.effective_user.id):
+        if update.effective_chat.type == constants.ChatType.PRIVATE:
+            await update.message.reply_text("⛔ Unauthorized.")
+        return
+
+    if userbot.is_connected:
+        user_handle = f"@{userbot.username}" if userbot.username else f"User ID: `{userbot.user_id}`"
+        text = (
+            f"⚡ *Userbot is Connected & Active!*\n\n"
+            f"• *Account:* {user_handle}\n"
+            f"• *Status:* Online & ready to auto-dispatch MLTB commands\n\n"
+            f"Whenever you ask to leech or mirror in the group, I will send `/leech` as your account so MLTB activates automatically!"
+        )
+    elif userbot.is_configured:
+        text = (
+            f"⚠️ *Userbot is configured but not connected.*\n\n"
+            f"Please check your VPS logs or restart the bot: `/update`."
+        )
+    else:
+        text = (
+            f"ℹ️ *Userbot is not configured yet.*\n\n"
+            f"To enable 100% hands-free MLTB dispatching:\n"
+            f"1. Run `python scripts/generate_session.py` on your PC or VPS.\n"
+            f"2. Add `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, and `TELEGRAM_USER_SESSION` to `.env`.\n"
+            f"3. Restart the bot (`docker compose restart ai-supervisor`)!\n\n"
+            f"*(In the meantime, I will give you 1-tap copy boxes for all leech commands).* "
+        )
+    await send_safe_response(update.message, text)
 
 # --- Media Generation Commands ---
 
@@ -537,13 +576,27 @@ async def handle_multimodal_message(
     direct_mltb = extract_mltb_command(user_prompt=clean_prompt, has_reply_media=has_reply_media)
     if direct_mltb:
         target_reply_id = update.message.reply_to_message.message_id if has_reply_media else None
-        logger.info(f"Directly dispatching MLTB command to chat: {direct_mltb}")
+        logger.info(f"MLTB command requested: {direct_mltb}")
         memory.add_history(user_id=user_id, role="user", content=clean_prompt, media_type=media_type)
         memory.add_history(user_id=user_id, role="assistant", content=direct_mltb)
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=direct_mltb,
-            reply_to_message_id=target_reply_id
+
+        if userbot.is_connected:
+            dispatched = await userbot.send_command(
+                chat_id=update.effective_chat.id,
+                command=direct_mltb,
+                reply_to_msg_id=target_reply_id,
+            )
+            if dispatched:
+                await update.message.reply_text(
+                    f"⚡ *Auto-dispatched to MLTB:*\n`{direct_mltb}`\n\n*(Sent via your user account)*",
+                    parse_mode=constants.ParseMode.MARKDOWN,
+                )
+                return
+
+        # Fallback if userbot is not connected: 1-tap copy block
+        await update.message.reply_text(
+            f"📋 *Tap to copy for MLTB:*\n`{direct_mltb}`\n\n*(Telegram blocks bot-to-bot commands; tap above to copy & send, or set up `/userbot`!)*",
+            parse_mode=constants.ParseMode.MARKDOWN,
         )
         return
 
@@ -581,10 +634,32 @@ async def handle_multimodal_message(
         except Exception as e:
             logger.warning(f"Failed to delete local file {media_path}: {e}")
 
-    # 8. Deliver response (if AI generated an MLTB command, output the raw command directly)
+    # 8. Deliver response
     mltb_ai_cmd = extract_mltb_command(text=response)
-    final_response = mltb_ai_cmd if mltb_ai_cmd else response
-    await send_safe_response(update.message, final_response)
+    if mltb_ai_cmd:
+        if userbot.is_connected:
+            dispatched = await userbot.send_command(
+                chat_id=update.effective_chat.id,
+                command=mltb_ai_cmd,
+                reply_to_msg_id=update.message.message_id,
+            )
+            if dispatched:
+                await update.message.reply_text(
+                    f"⚡ *Auto-dispatched to MLTB:*\n`{mltb_ai_cmd}`\n\n*(Sent via your user account)*",
+                    parse_mode=constants.ParseMode.MARKDOWN,
+                )
+            else:
+                await update.message.reply_text(
+                    f"📋 *Tap to copy for MLTB:*\n`{mltb_ai_cmd}`\n\n*(Tap above to copy & send)*",
+                    parse_mode=constants.ParseMode.MARKDOWN,
+                )
+        else:
+            await update.message.reply_text(
+                f"📋 *Tap to copy for MLTB:*\n`{mltb_ai_cmd}`\n\n*(Telegram blocks bot-to-bot commands; tap above to copy & send, or set up `/userbot`!)*",
+                parse_mode=constants.ParseMode.MARKDOWN,
+            )
+    else:
+        await send_safe_response(update.message, response)
 
     # 9. Voice Reply if triggered by audio input
     if reply_with_voice:
@@ -669,10 +744,11 @@ BOT_COMMANDS = [
     BotCommand("clear", "Reset short-term conversation context"),
     BotCommand("check_update", "Check for updates from GitHub repository"),
     BotCommand("update", "Pull latest updates from GitHub and restart"),
+    BotCommand("userbot", "Check Userbot auto-dispatch status"),
 ]
 
 async def post_init_hook(application):
-    """Registers slash commands for both Private Chats and Group Chats, starts scheduler, and notifies on restart."""
+    """Registers slash commands for both Private Chats and Group Chats, starts scheduler and userbot, and notifies on restart."""
     try:
         await application.bot.set_my_commands(BOT_COMMANDS, scope=BotCommandScopeAllPrivateChats())
         await application.bot.set_my_commands(BOT_COMMANDS, scope=BotCommandScopeAllGroupChats())
@@ -688,6 +764,13 @@ async def post_init_hook(application):
     )
     scheduler.start()
     application.bot_data["scheduler"] = scheduler
+
+    if userbot.is_configured:
+        logger.info("Initializing Userbot client in background...")
+        started = await userbot.start()
+        if started:
+            user_handle = f"@{userbot.username}" if userbot.username else f"User {userbot.user_id}"
+            logger.info(f"Userbot auto-dispatch active as {user_handle}")
 
     # Notify admin if this startup was triggered by an applied update
     if os.environ.get("_ALREADY_UPDATED") == "1":
@@ -710,6 +793,11 @@ async def post_init_hook(application):
             except Exception as e:
                 logger.warning(f"Failed to send update restart notification: {e}")
 
+async def post_shutdown_hook(application):
+    """Disconnects Userbot upon bot shutdown."""
+    if userbot.is_connected:
+        await userbot.stop()
+
 def main():
     try:
         config.settings.validate_for_bot()
@@ -731,6 +819,7 @@ def main():
         .connect_timeout(30.0)
         .pool_timeout(30.0)
         .post_init(post_init_hook)
+        .post_shutdown(post_shutdown_hook)
         .build()
     )
 
@@ -748,6 +837,7 @@ def main():
     # Maintenance & Update commands
     app.add_handler(CommandHandler("check_update", check_update_command))
     app.add_handler(CommandHandler("update", update_command))
+    app.add_handler(CommandHandler("userbot", userbot_command))
 
     # Reporting & Backup commands
     app.add_handler(CommandHandler("report", report_command))

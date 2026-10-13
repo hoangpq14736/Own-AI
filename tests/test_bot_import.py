@@ -12,4 +12,7 @@ def test_bot_imports_and_symbols():
     assert hasattr(bot, "send_safe_response")
     assert hasattr(bot, "check_update_command")
     assert hasattr(bot, "update_command")
+    assert hasattr(bot, "userbot_command")
+    assert hasattr(bot, "userbot")
     assert hasattr(bot, "post_init_hook")
+    assert hasattr(bot, "post_shutdown_hook")

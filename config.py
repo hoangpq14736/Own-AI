@@ -38,6 +38,9 @@ class Settings(BaseModel):
     git_repo_url: str = Field(default="https://github.com/hoangpq14736/Own-AI.git")
     enable_group_free_chat: bool = Field(default=False)
     github_token: str = Field(default="")
+    telegram_api_id: Optional[int] = Field(default=None)
+    telegram_api_hash: str = Field(default="")
+    telegram_user_session: str = Field(default="")
 
     model_config = {
         "frozen": True,
@@ -109,6 +112,11 @@ def load_settings_from_env() -> Settings:
     git_repo_url = os.getenv("GIT_REPO_URL", "https://github.com/hoangpq14736/Own-AI.git").strip()
     enable_group_free = os.getenv("ENABLE_GROUP_FREE_CHAT", "false").lower() in ("true", "1", "yes")
 
+    raw_api_id = os.getenv("TELEGRAM_API_ID", os.getenv("API_ID", "")).strip()
+    api_id = int(raw_api_id) if raw_api_id.isdigit() else None
+    api_hash = os.getenv("TELEGRAM_API_HASH", os.getenv("API_HASH", "")).strip()
+    user_session = os.getenv("TELEGRAM_USER_SESSION", os.getenv("USER_SESSION_STRING", "")).strip()
+
     return Settings(
         gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", "").strip(),
@@ -126,6 +134,9 @@ def load_settings_from_env() -> Settings:
         git_repo_url=git_repo_url,
         enable_group_free_chat=enable_group_free,
         github_token=os.getenv("GITHUB_TOKEN", "").strip(),
+        telegram_api_id=api_id,
+        telegram_api_hash=api_hash,
+        telegram_user_session=user_session,
     )
 
 
@@ -145,3 +156,6 @@ AUTO_UPDATE_ON_RESTART = settings.auto_update_on_restart
 GIT_BRANCH = settings.git_branch
 ENABLE_GROUP_FREE_CHAT = settings.enable_group_free_chat
 GITHUB_TOKEN = settings.github_token
+TELEGRAM_API_ID = settings.telegram_api_id
+TELEGRAM_API_HASH = settings.telegram_api_hash
+TELEGRAM_USER_SESSION = settings.telegram_user_session
