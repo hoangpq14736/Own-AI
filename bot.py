@@ -1,4 +1,5 @@
 import os
+import re
 import io
 import asyncio
 import logging
@@ -39,6 +40,7 @@ from core.telegram_utils import (
     send_safe_response,
     safe_edit_text,
     resolve_mltb_target,
+    should_enable_search,
 )
 from core.updater import (
     check_for_updates,
@@ -118,6 +120,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "**Auto-Updates & Maintenance:**\n"
         "• 🔍 `/check_update` - Check for new commits on GitHub\n"
         "• 🚀 `/update` - Pull latest updates & restart bot\n\n"
+        "**Online Knowledge & Web Search:**\n"
+        "• 🌐 `/search <query>` - Real-time Google Search grounding (tin tức, giá cả, thời tiết)\n\n"
         "**Self-Learning Memory:**\n"
         "• `/rules` - View learned rules\n"
         "• `/delete_rule <id>` - Remove a rule\n"
@@ -128,6 +132,35 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await start_command(update, context)
+
+async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Explicit on-demand Google Search grounding command: /search <query>."""
+    if not is_authorized(update.effective_user.id):
+        if update.effective_chat.type == constants.ChatType.PRIVATE:
+            await update.message.reply_text("⛔ Unauthorized.")
+        return
+
+    query = " ".join(context.args) if context.args else ""
+    if not query:
+        await update.message.reply_text(
+            "🔍 **Cách dùng tìm kiếm Google:**\n\n"
+            "Gõ: `/search <nội dung cần tìm>`\n"
+            "Ví dụ:\n"
+            "• `/search giá vàng hôm nay`\n"
+            "• `/search thời tiết hà nội`\n"
+            "• `/search phim điện ảnh mới ra mắt`",
+            parse_mode=constants.ParseMode.MARKDOWN
+        )
+        return
+
+    await handle_multimodal_message(
+        update,
+        context,
+        prompt_text=query,
+        media_type="text",
+        force_search=True
+    )
+
 
 # --- Reporting & Backup Commands ---
 
@@ -533,7 +566,8 @@ async def handle_multimodal_message(
     media_path: Path = None,
     media_type: str = "text",
     prompt_text: str = "",
-    reply_with_voice: bool = False
+    reply_with_voice: bool = False,
+    force_search: bool = False,
 ):
     user_id = str(update.effective_user.id)
     chat_type = update.effective_chat.type
@@ -652,13 +686,21 @@ async def handle_multimodal_message(
             last_assistant_msg = turn.content
             break
 
-    # 5. Fast Multimodal Call (Primary Request)
+    # 5. Fast Multimodal Call with On-Demand Search Grounding
+    use_search = force_search or (
+        config.ENABLE_SEARCH_GROUNDING and should_enable_search(clean_prompt)
+    )
+    if use_search and clean_prompt:
+        clean_prompt = re.sub(r"^/(?:search|google)\s*", "", clean_prompt, flags=re.IGNORECASE).strip()
+        logger.info(f"Google Search Grounding activated for: {clean_prompt[:60]}")
+
     effective_prompt = clean_prompt if clean_prompt else "Please analyze this file."
     response = await gemini.generate_multimodal(
         prompt=effective_prompt,
         media_path=media_path,
         system_instruction=system_rules,
-        chat_history=recent_history
+        chat_history=recent_history,
+        enable_search=use_search,
     )
 
     # 6. Save to chat history
@@ -848,6 +890,8 @@ def main():
     # System & VPS commands
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("search", search_command))
+    app.add_handler(CommandHandler("google", search_command))
     app.add_handler(CommandHandler("vps", vps_command))
     app.add_handler(CommandHandler("docker", docker_command))
     app.add_handler(CommandHandler("mltb_logs", mltb_logs_command))

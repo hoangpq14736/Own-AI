@@ -207,3 +207,33 @@ async def safe_edit_text(message: Any, text: str, parse_mode: Optional[str] = "M
             logger.error(f"Failed to edit message in plain text fallback: {inner_e}")
             raise inner_e
 
+
+SEARCH_TRIGGERS = [
+    # Explicit search commands / verbs
+    "tìm kiếm", "tra cứu", "tìm trên mạng", "tra google", "google hộ", "search hộ", "tìm hộ", "tìm giúp",
+    "search ", "/search", "/google",
+    # Financial & market metrics
+    "giá vàng", "giá xăng", "giá dầu", "giá btc", "giá bitcoin", "giá usd", "tỷ giá", "chứng khoán",
+    # Live events / news / weather
+    "thời tiết", "dự báo thời tiết", "tin tức", "thời sự", "bản tin",
+    "kết quả bóng đá", "lịch thi đấu", "bảng xếp hạng", "tỷ số trận",
+    # Recency & freshness
+    "mới nhất", "vừa ra mắt", "đang chiếu rạp", "hot nhất hiện nay", "gần đây nhất",
+    # English triggers
+    "who won", "latest news", "current price", "weather in", "look up",
+]
+
+
+def should_enable_search(text: Optional[str]) -> bool:
+    """
+    Evaluates whether a user prompt warrants activating Google Search grounding.
+    Uses on-demand matching to prevent unnecessary API grounding fees on pay-as-you-go accounts.
+    """
+    if not text:
+        return False
+    t = text.strip().lower()
+    if t.startswith(("/search", "/google", "search ", "google ", "tìm ")):
+        return True
+    return any(trigger in t for trigger in SEARCH_TRIGGERS)
+
+

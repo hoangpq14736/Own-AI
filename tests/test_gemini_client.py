@@ -138,3 +138,36 @@ async def test_generate_multimodal_safety_toggle(mock_genai_client):
     call_kwargs2 = mock_genai_client.models.generate_content.call_args.kwargs
     assert call_kwargs2["config"].safety_settings is None
 
+@pytest.mark.anyio
+async def test_generate_multimodal_search_grounding(mock_genai_client):
+    # Setup mock response with grounding chunks
+    chunk1 = MagicMock(web=MagicMock(title="VnExpress", uri="https://vnexpress.net/gold"))
+    chunk2 = MagicMock(web=MagicMock(title="Tuoi Tre", uri="https://tuoitre.vn/gold"))
+    candidate_mock = MagicMock()
+    candidate_mock.grounding_metadata.grounding_chunks = [chunk1, chunk2]
+    
+    mock_response = MagicMock()
+    mock_response.text = "Giá vàng hôm nay là 85 triệu đồng/lượng."
+    mock_response.candidates = [candidate_mock]
+    mock_genai_client.models.generate_content.return_value = mock_response
+
+    client = GeminiClient(api_key="test-key", client=mock_genai_client)
+    res = await client.generate_multimodal(prompt="Giá vàng hôm nay", enable_search=True)
+
+    # Verify search tools were attached
+    call_kwargs = mock_genai_client.models.generate_content.call_args.kwargs
+    assert call_kwargs["config"].tools is not None
+    assert call_kwargs["config"].tools == [{"google_search": {}}]
+
+    # Verify citations appended
+    assert "Giá vàng hôm nay là 85 triệu đồng/lượng." in res
+    assert "Nguồn tra cứu:" in res
+    assert "[VnExpress](https://vnexpress.net/gold)" in res
+    assert "[Tuoi Tre](https://tuoitre.vn/gold)" in res
+
+    # Without search
+    await client.generate_multimodal(prompt="Tâm sự", enable_search=False)
+    call_kwargs_no_search = mock_genai_client.models.generate_content.call_args.kwargs
+    assert call_kwargs_no_search["config"].tools is None
+
+

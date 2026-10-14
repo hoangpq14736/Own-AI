@@ -7,6 +7,7 @@ from core.telegram_utils import (
     send_safe_response,
     safe_edit_text,
     resolve_mltb_target,
+    should_enable_search,
 )
 
 def test_strip_bot_mention():
@@ -242,4 +243,34 @@ async def test_safe_edit_text_total_failure_raises():
     msg = MockMessage(fail_all=True)
     with pytest.raises(RuntimeError, match="Telegram network failure"):
         await safe_edit_text(msg, "Any text")
+
+
+def test_should_enable_search_triggers():
+    # Empty or None
+    assert should_enable_search(None) is False
+    assert should_enable_search("") is False
+    assert should_enable_search("   ") is False
+
+    # Explicit commands
+    assert should_enable_search("/search giá vàng hôm nay") is True
+    assert should_enable_search("/google tin tức mới") is True
+    assert should_enable_search("search ai là tổng thống mỹ") is True
+    assert should_enable_search("google cách làm bánh") is True
+    assert should_enable_search("tìm quán cà phê đẹp gần đây") is True
+
+    # Real-time topics
+    assert should_enable_search("giá vàng sjc hôm nay bao nhiêu?") is True
+    assert should_enable_search("giá btc hiện tại thế nào") is True
+    assert should_enable_search("thời tiết hà nội ngày mai") is True
+    assert should_enable_search("tin tức mới nhất về bão số 3") is True
+    assert should_enable_search("kết quả bóng đá ngoại hạng anh đêm qua") is True
+    assert should_enable_search("phim chiếu rạp mới nhất") is True
+    assert should_enable_search("phim người lớn hot nhất hiện nay") is True
+
+    # Non-search conversational messages
+    assert should_enable_search("hôm nay tôi mệt quá") is False
+    assert should_enable_search("viết cho tôi hàm python tính fibonacci") is False
+    assert should_enable_search("chào bạn nhé, bạn tên là gì?") is False
+    assert should_enable_search("tôi buồn ngủ quá đi ngủ đây") is False
+
 

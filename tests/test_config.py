@@ -77,3 +77,19 @@ def test_disable_safety_filters_config(monkeypatch):
     s_false = load_settings_from_env()
     assert s_false.disable_safety_filters is False
 
+def test_enable_search_grounding_config(monkeypatch):
+    # Default is True
+    s_default = Settings()
+    assert s_default.enable_search_grounding is True
+
+    # From env true
+    monkeypatch.setenv("ENABLE_SEARCH_GROUNDING", "true")
+    s_true = load_settings_from_env()
+    assert s_true.enable_search_grounding is True
+
+    # From env false
+    monkeypatch.setenv("ENABLE_SEARCH_GROUNDING", "false")
+    s_false = load_settings_from_env()
+    assert s_false.enable_search_grounding is False
+
+

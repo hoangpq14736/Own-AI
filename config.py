@@ -43,6 +43,7 @@ class Settings(BaseModel):
     telegram_user_session: str = Field(default="")
     mltb_target_chat: Optional[Union[int, str]] = Field(default=None)
     disable_safety_filters: bool = Field(default=True)
+    enable_search_grounding: bool = Field(default=True)
 
     model_config = {
         "frozen": True,
@@ -128,6 +129,7 @@ def load_settings_from_env() -> Settings:
             mltb_target = raw_mltb_target if raw_mltb_target.startswith("@") else f"@{raw_mltb_target}"
 
     disable_safety = os.getenv("DISABLE_SAFETY_FILTERS", "true").lower() in ("true", "1", "yes")
+    enable_search = os.getenv("ENABLE_SEARCH_GROUNDING", "true").lower() in ("true", "1", "yes")
 
     return Settings(
         gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
@@ -151,6 +153,7 @@ def load_settings_from_env() -> Settings:
         telegram_user_session=user_session,
         mltb_target_chat=mltb_target,
         disable_safety_filters=disable_safety,
+        enable_search_grounding=enable_search,
     )
 
 
@@ -175,4 +178,6 @@ TELEGRAM_API_HASH = settings.telegram_api_hash
 TELEGRAM_USER_SESSION = settings.telegram_user_session
 MLTB_TARGET_CHAT = settings.mltb_target_chat
 DISABLE_SAFETY_FILTERS = settings.disable_safety_filters
+ENABLE_SEARCH_GROUNDING = settings.enable_search_grounding
+
 

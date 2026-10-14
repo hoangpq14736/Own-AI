@@ -83,9 +83,10 @@ class GeminiClient:
         self,
         model: str,
         contents: list,
-        system_instruction: Optional[str] = None
+        system_instruction: Optional[str] = None,
+        enable_search: bool = False,
     ) -> str:
-        """Synchronous wrapper for generate_content."""
+        """Synchronous wrapper for generate_content with optional Google Search grounding."""
         if not self.client:
             raise GeminiAPIError("GenAI client is not initialized.")
 
@@ -96,12 +97,38 @@ class GeminiClient:
         if self.disable_safety_filters:
             config.safety_settings = self._get_safety_settings()
 
+        if enable_search:
+            config.tools = [{"google_search": {}}]
+
         response = self.client.models.generate_content(
             model=model,
             contents=contents,
             config=config
         )
-        return getattr(response, "text", "") or "Received empty response."
+
+        main_text = getattr(response, "text", "") or "Received empty response."
+
+        # Format and append sources if search was enabled and grounding metadata exists
+        if enable_search and hasattr(response, "candidates") and response.candidates:
+            candidate = response.candidates[0]
+            metadata = getattr(candidate, "grounding_metadata", None)
+            if metadata:
+                chunks = getattr(metadata, "grounding_chunks", None)
+                if chunks:
+                    sources = []
+                    seen_urls = set()
+                    for chunk in chunks:
+                        web = getattr(chunk, "web", None)
+                        if web and getattr(web, "uri", None):
+                            uri = web.uri
+                            if uri not in seen_urls:
+                                seen_urls.add(uri)
+                                title = getattr(web, "title", uri) or uri
+                                sources.append(f"• [{title}]({uri})")
+                    if sources:
+                        main_text += "\n\n🌐 **Nguồn tra cứu:**\n" + "\n".join(sources[:5])
+
+        return main_text
 
     async def generate_multimodal(
         self,
@@ -109,7 +136,8 @@ class GeminiClient:
         media_path: Optional[Path] = None,
         system_instruction: Optional[str] = None,
         chat_history: Optional[List[Union[ChatMessage, dict]]] = None,
-        model_override: Optional[str] = None
+        model_override: Optional[str] = None,
+        enable_search: bool = False,
     ) -> str:
         """
         Ultra-fast async multimodal generation with inline byte transmission
@@ -171,7 +199,8 @@ class GeminiClient:
                         self._sync_generate,
                         candidate,
                         contents,
-                        system_instruction
+                        system_instruction,
+                        enable_search,
                     )
                     return result
                 except Exception as e:
