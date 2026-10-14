@@ -115,17 +115,50 @@ async def test_general_chat_not_triggered(mock_gemini):
     assert cmd is None
 
 @pytest.mark.asyncio
+async def test_archive_password_and_selective_files(mock_gemini):
+    # Password test
+    response_mock = MagicMock()
+    response_mock.text = json.dumps({
+        "is_mltb_intent": True,
+        "command": "/unzipleech",
+        "fullCommand": "/unzipleech https://example.com/data.rar -p 123456",
+        "explanation": "Leech and extract archive with password"
+    })
+    mock_gemini.client.aio.models.generate_content = AsyncMock(return_value=response_mock)
+
+    prompt = "tải và giải nén file https://example.com/data.rar pass là 123456"
+    cmd, exp = await translate_natural_language_to_mltb(mock_gemini, prompt)
+    assert "-p 123456" in cmd
+
+    # Selective files test
+    response_mock.text = json.dumps({
+        "is_mltb_intent": True,
+        "command": "/qbleech",
+        "fullCommand": "/qbleech magnet:?xt=urn:btih:xyz -s",
+        "explanation": "Leech torrent with file selection"
+    })
+    prompt = "tải torrent magnet:?xt=urn:btih:xyz cho tao chọn file"
+    cmd, exp = await translate_natural_language_to_mltb(mock_gemini, prompt)
+    assert "-s" in cmd
+
+@pytest.mark.asyncio
 async def test_empty_prompt_and_reply_media_fast_path(mock_gemini):
     # Empty prompt
     cmd, exp = await translate_natural_language_to_mltb(mock_gemini, "")
     assert cmd is None
 
-    # Reply media fast-path
+    # Reply media fast-path (Leech with extract)
     cmd, exp = await translate_natural_language_to_mltb(mock_gemini, "giải nén rồi leech", has_reply_media=True)
     assert cmd == "/leech -uz"
 
+    # Reply media fast-path (Leech with zip)
     cmd, exp = await translate_natural_language_to_mltb(mock_gemini, "nén zip tải về", has_reply_media=True)
     assert cmd == "/leech -z"
+
+    # Reply media fast-path (Mirror to cloud with document mode)
+    cmd, exp = await translate_natural_language_to_mltb(mock_gemini, "mirror file tài liệu này lên drive", has_reply_media=True)
+    assert cmd == "/mirror -c"
+    assert "Drive" in exp
 
 @pytest.mark.asyncio
 async def test_gemini_exception_handled(mock_gemini):

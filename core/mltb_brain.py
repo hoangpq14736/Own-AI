@@ -63,6 +63,8 @@ Convert the user's conversational message (English, Vietnamese, or shorthand) in
    - -b: Bulk download links
    - -au <user:pass>: HTTP/FTP authentication
    - -h <header:value>: Custom HTTP headers
+   - -p <password>: Archive password for password-protected archives (zip, rar, 7z)
+   - -i <indices>: Direct file selection indices for torrents (e.g. -i 1,3,5 or -i 1-4)
 
 8. YTDL Options (via opt: or -opt):
    anasty17 MLTB accepts yt-dlp arguments formatted as "opt: key=val,key2=val2" or "opt: format=...".
@@ -92,7 +94,29 @@ Convert the user's conversational message (English, Vietnamese, or shorthand) in
 RULES:
 - If the user's message is general chat, programming questions, or non-MLTB conversation, set "is_mltb_intent" to false.
 - Respect any user memory rules provided (e.g. default upload remote, preferred engines, naming rules).
-- Destination: Default to /ytdlleech (Telegram) unless user specifically mentions cloud, drive, rclone, or mirror (/ytdl).
+- Mirror vs Leech Destination:
+  * Default to Telegram Leech (/leech, /unzipleech, /zipleech, /qbleech, /ytdlleech) unless user specifically mentions cloud, drive, rclone, or mirror (/mirror, /unzipmirror, /zipmirror, /qbmirror, /ytdl).
+  * Torrent / Magnet: Prefer qBit engine (/qbleech or /qbmirror) for torrents unless aria2 is specified.
+- Archive Extraction & Compression:
+  * "giải nén", "unzip", "extract", "xả nén" -> /unzipleech or /unzipmirror (or add flag -uz)
+  * "nén zip", "nén lại", "pack zip", "zip" -> /zipleech or /zipmirror (or add flag -z)
+  * "mật khẩu", "mật mã", "pass là" <pwd> -> add flag -p <pwd>
+- Advanced Flags:
+  * "cho tao chọn file", "chọn file", "chọn tập", "select files" -> add flag -s
+  * "chỉ tải file 1,2", "tập 1 đến 5" -> add flag -i <indices>
+  * "đổi tên thành", "đặt tên là", "rename to" <name> -> add flag -n <name>
+  * "lên remote", "lên thư mục", "lên gdrive" -> add flag -up <remote:path>
+  * "dạng tài liệu", "dạng document", "file gốc" -> add flag -c
+  * "video mẫu", "sample", "cắt 30s" -> add flag -ss <seconds>
+  * "seed ratio", "seed trong" -> add flag -sd <ratio:time>
+- Task & Utility Queries:
+  * "tiến độ", "tình trạng tải", "status" -> /status
+  * "hủy tải", "dừng tải", "cancel" -> /cancel
+  * "hủy tất cả", "hủy hết" -> /cancelall
+  * "kiểm tra mạng", "speedtest" -> /speedtest
+  * "thông số server", "cpu ram", "stats" -> /stats
+  * "đếm dung lượng drive", "count" -> /count <url>
+  * "clone drive", "copy drive" -> /clone <url>
 - Format & Quality Mapping:
   * "âm thanh tốt nhất", "tải nhạc", "nhạc tốt nhất", "audio tốt nhất", "best audio" -> use "opt: format=bestaudio/best"
   * "video tốt nhất", "định dạng video tốt nhất", "chất lượng cao nhất", "best video" -> use "opt: format=bv*+ba/b"
@@ -102,8 +126,8 @@ RULES:
   * "720p", "hd" -> use "opt: format=bv*[height<=720]+ba/b"
 - Return JSON ONLY with keys:
   "is_mltb_intent": bool,
-  "command": base command (e.g. "/ytdlleech"),
-  "fullCommand": complete command with URL and flags (e.g. "/ytdlleech https://... opt: format=bestaudio/best"),
+  "command": base command (e.g. "/qbunzipleech"),
+  "fullCommand": complete command with URL and flags (e.g. "/qbunzipleech magnet:... -n Film.mkv -s"),
   "explanation": concise 1-line reason in the user's language
 """
 
@@ -120,17 +144,22 @@ async def translate_natural_language_to_mltb(
     if not user_prompt:
         return None, None
 
-    # Fast-path for replying to media with "leech" or "tải"
-    if has_reply_media and any(k in user_prompt.lower() for k in ["leech", "tải", "down"]):
+    # Fast-path for replying to media with "leech", "tải", "mirror", "up"
+    if has_reply_media and any(k in user_prompt.lower() for k in ["leech", "tải", "down", "mirror", "up"]):
         flags = []
-        if any(u in user_prompt.lower() for u in ["unzip", "giải nén", "extract"]):
+        if any(u in user_prompt.lower() for u in ["unzip", "giải nén", "extract", "xả nén"]):
             flags.append("-uz")
         elif any(z in user_prompt.lower() for z in ["zip", "nén"]):
             flags.append("-z")
-        cmd = "/leech"
+        if any(c in user_prompt.lower() for c in ["doc", "document", "tài liệu"]):
+            flags.append("-c")
+
+        is_mirror = any(m in user_prompt.lower() for m in ["drive", "cloud", "mirror", "rclone", "gdrive", "onedrive"])
+        cmd = "/mirror" if is_mirror else "/leech"
         if flags:
             cmd += " " + " ".join(flags)
-        return cmd, "Leech replied media to Telegram"
+        dest = "Google Drive / Cloud" if is_mirror else "Telegram"
+        return cmd, f"{'Mirror' if is_mirror else 'Leech'} replied media to {dest}"
 
     # Assemble system instruction including Own-AI's learned user rules
     instruction = MLTB_SYSTEM_PROMPT
