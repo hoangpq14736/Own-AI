@@ -15,5 +15,6 @@ def test_bot_imports_and_symbols():
     assert hasattr(bot, "update_command")
     assert hasattr(bot, "userbot_command")
     assert hasattr(bot, "userbot")
+    assert hasattr(bot, "translate_natural_language_to_mltb")
     assert hasattr(bot, "post_init_hook")
     assert hasattr(bot, "post_shutdown_hook")

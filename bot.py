@@ -48,6 +48,7 @@ from core.updater import (
     get_current_commit_info,
 )
 from core.userbot import UserbotClient
+from core.mltb_brain import translate_natural_language_to_mltb
 
 # Setup Logging
 logging.basicConfig(
@@ -577,9 +578,19 @@ async def handle_multimodal_message(
         )
     )
 
-    direct_mltb = extract_mltb_command(user_prompt=clean_prompt, has_reply_media=has_reply_media)
+    # Lấy các quy tắc và sở thích đã học từ SQLite memory
+    system_rules = memory.build_memory_system_prompt(user_id)
+
+    # Gọi bộ não AI dịch ngôn ngữ tự nhiên sang lệnh MLTB
+    direct_mltb, mltb_explanation = await translate_natural_language_to_mltb(
+        gemini_client=gemini,
+        user_prompt=clean_prompt,
+        system_rules=system_rules,
+        has_reply_media=has_reply_media,
+    )
+
     if direct_mltb:
-        logger.info(f"MLTB command requested: {direct_mltb}")
+        logger.info(f"MLTB command synthesized via Brain: {direct_mltb} ({mltb_explanation})")
         memory.add_history(user_id=user_id, role="user", content=clean_prompt, media_type=media_type)
         memory.add_history(user_id=user_id, role="assistant", content=direct_mltb)
 
@@ -591,27 +602,33 @@ async def handle_multimodal_message(
         )
 
         if userbot.is_connected and target_chat:
-            target_reply_id = update.message.reply_to_message.message_id if (has_reply_media and target_chat == update.effective_chat.id) else None
+            target_reply_id = (
+                update.message.reply_to_message.message_id
+                if (has_reply_media and target_chat == update.effective_chat.id)
+                else None
+            )
             dispatched = await userbot.send_command(
                 chat_id=target_chat,
                 command=direct_mltb,
                 reply_to_msg_id=target_reply_id,
             )
             if dispatched:
-                dest_name = f"@{str(target_chat).lstrip('@')}" if str(target_chat).startswith("@") else "Control Room"
-                if target_chat == update.effective_chat.id:
-                    msg_text = f"⚡ *Auto-dispatched to MLTB:*\n`{direct_mltb}`\n\n*(Sent via your user account)*"
-                else:
-                    msg_text = f"⚡ *Auto-dispatched to MLTB ({dest_name}):*\n`{direct_mltb}`\n\n*(Sent via your user account to {dest_name})*"
+                dest_name = (
+                    f"@{str(target_chat).lstrip('@')}"
+                    if str(target_chat).startswith("@")
+                    else "Control Room"
+                )
                 await update.message.reply_text(
-                    msg_text,
+                    f"⚡ *Auto-dispatched to MLTB ({dest_name}):*\n`{direct_mltb}`\n\n"
+                    f"_{mltb_explanation}_\n*(Sent via your user account)*",
                     parse_mode=constants.ParseMode.MARKDOWN,
                 )
                 return
 
-        # Fallback if userbot is not connected: 1-tap copy block
+        # Fallback nếu userbot tạm thời chưa kết nối
         await update.message.reply_text(
-            f"📋 *Tap to copy for MLTB:*\n`{direct_mltb}`\n\n*(Telegram blocks bot-to-bot commands; tap above to copy & send, or set up `/userbot`!)*",
+            f"📋 *Tap to copy for MLTB:*\n`{direct_mltb}`\n\n"
+            f"_{mltb_explanation}_\n*(Telegram blocks bot-to-bot commands; tap above to copy & send, or check `/userbot`!)*",
             parse_mode=constants.ParseMode.MARKDOWN,
         )
         return
