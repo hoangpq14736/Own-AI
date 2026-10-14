@@ -42,6 +42,7 @@ class Settings(BaseModel):
     telegram_api_hash: str = Field(default="")
     telegram_user_session: str = Field(default="")
     mltb_target_chat: Optional[Union[int, str]] = Field(default=None)
+    disable_safety_filters: bool = Field(default=True)
 
     model_config = {
         "frozen": True,
@@ -126,6 +127,8 @@ def load_settings_from_env() -> Settings:
         except ValueError:
             mltb_target = raw_mltb_target if raw_mltb_target.startswith("@") else f"@{raw_mltb_target}"
 
+    disable_safety = os.getenv("DISABLE_SAFETY_FILTERS", "true").lower() in ("true", "1", "yes")
+
     return Settings(
         gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", "").strip(),
@@ -147,6 +150,7 @@ def load_settings_from_env() -> Settings:
         telegram_api_hash=api_hash,
         telegram_user_session=user_session,
         mltb_target_chat=mltb_target,
+        disable_safety_filters=disable_safety,
     )
 
 
@@ -170,3 +174,5 @@ TELEGRAM_API_ID = settings.telegram_api_id
 TELEGRAM_API_HASH = settings.telegram_api_hash
 TELEGRAM_USER_SESSION = settings.telegram_user_session
 MLTB_TARGET_CHAT = settings.mltb_target_chat
+DISABLE_SAFETY_FILTERS = settings.disable_safety_filters
+

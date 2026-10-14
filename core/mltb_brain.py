@@ -223,13 +223,19 @@ async def translate_natural_language_to_mltb(
         instruction += f"\n\nUSER LEARNED PREFERENCES & RULES:\n{system_rules}"
 
     try:
+        config_kwargs = {
+            "system_instruction": instruction,
+            "response_mime_type": "application/json",
+        }
+        if getattr(gemini_client, "disable_safety_filters", True) and hasattr(gemini_client, "_get_safety_settings"):
+            candidate = gemini_client._get_safety_settings()
+            if isinstance(candidate, list) and all(isinstance(s, types.SafetySetting) for s in candidate):
+                config_kwargs["safety_settings"] = candidate
+
         response = await gemini_client.client.aio.models.generate_content(
             model="gemini-3.8-flash",
             contents=user_prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=instruction,
-                response_mime_type="application/json",
-            )
+            config=types.GenerateContentConfig(**config_kwargs)
         )
         data = json.loads(response.text)
         if data.get("is_mltb_intent") and data.get("fullCommand"):

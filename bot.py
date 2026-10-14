@@ -59,7 +59,11 @@ logger = logging.getLogger(__name__)
 
 # Initialize components
 memory = MemoryEngine(config.DB_PATH)
-gemini = GeminiClient(api_key=config.GEMINI_API_KEY, model_name=config.MODEL_NAME)
+gemini = GeminiClient(
+    api_key=config.GEMINI_API_KEY,
+    model_name=config.MODEL_NAME,
+    disable_safety_filters=config.DISABLE_SAFETY_FILTERS,
+)
 reflector = Reflector(gemini_client=gemini, memory_engine=memory)
 userbot = UserbotClient(
     api_id=config.TELEGRAM_API_ID,

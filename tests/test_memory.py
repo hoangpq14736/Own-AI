@@ -79,10 +79,12 @@ def test_build_memory_prompt(temp_memory):
     assert "Always format code in Python" in prompt
     assert "User is a cloud engineer" in prompt
     assert "[PERSISTENT MEMORY & SELF-LEARNED RULES]" in prompt
+    assert "[PERSONAL COMPANION DIRECTIVE]" in prompt
 
-    # Empty user has base MLTB prompt without persistent memory block
+    # Empty user has base MLTB prompt and companion directive without persistent memory block
     empty_prompt = temp_memory.build_memory_system_prompt("non_existent_user")
     assert "[MLTB KNOWLEDGE BASE]" in empty_prompt
+    assert "[PERSONAL COMPANION DIRECTIVE]" in empty_prompt
     assert "[PERSISTENT MEMORY & SELF-LEARNED RULES]" not in empty_prompt
 
 def test_chat_history(temp_memory):

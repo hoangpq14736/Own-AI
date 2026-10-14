@@ -61,3 +61,19 @@ def test_enable_group_free_chat(monkeypatch):
     monkeypatch.setenv("ENABLE_GROUP_FREE_CHAT", "true")
     s = load_settings_from_env()
     assert s.enable_group_free_chat is True
+
+def test_disable_safety_filters_config(monkeypatch):
+    # Default is True
+    s_default = Settings()
+    assert s_default.disable_safety_filters is True
+
+    # From env true
+    monkeypatch.setenv("DISABLE_SAFETY_FILTERS", "true")
+    s_true = load_settings_from_env()
+    assert s_true.disable_safety_filters is True
+
+    # From env false
+    monkeypatch.setenv("DISABLE_SAFETY_FILTERS", "false")
+    s_false = load_settings_from_env()
+    assert s_false.disable_safety_filters is False
+

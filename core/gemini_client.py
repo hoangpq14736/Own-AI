@@ -31,10 +31,12 @@ class GeminiClient:
         self,
         api_key: str,
         model_name: str = "gemini-3.8-flash",
-        client: Optional[Any] = None
+        client: Optional[Any] = None,
+        disable_safety_filters: bool = True
     ):
         self.api_key = api_key.strip() if api_key else ""
         self.model_name = model_name.strip() if model_name else "gemini-3.8-flash"
+        self.disable_safety_filters = disable_safety_filters
 
         if client:
             self.client = client
@@ -50,6 +52,33 @@ class GeminiClient:
             "gemini-flash-lite-latest",
         ]
 
+    def _get_safety_settings(self) -> list:
+        """Returns relaxed safety settings disabling aggressive content censorship."""
+        if not GENAI_AVAILABLE:
+            return []
+        return [
+            types.SafetySetting(
+                category=types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                threshold=types.HarmBlockThreshold.BLOCK_NONE,
+            ),
+            types.SafetySetting(
+                category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                threshold=types.HarmBlockThreshold.BLOCK_NONE,
+            ),
+            types.SafetySetting(
+                category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                threshold=types.HarmBlockThreshold.BLOCK_NONE,
+            ),
+            types.SafetySetting(
+                category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                threshold=types.HarmBlockThreshold.BLOCK_NONE,
+            ),
+            types.SafetySetting(
+                category=types.HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY,
+                threshold=types.HarmBlockThreshold.BLOCK_NONE,
+            ),
+        ]
+
     def _sync_generate(
         self,
         model: str,
@@ -63,6 +92,9 @@ class GeminiClient:
         config = types.GenerateContentConfig()
         if system_instruction:
             config.system_instruction = system_instruction
+
+        if self.disable_safety_filters:
+            config.safety_settings = self._get_safety_settings()
 
         response = self.client.models.generate_content(
             model=model,

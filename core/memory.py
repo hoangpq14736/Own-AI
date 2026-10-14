@@ -34,6 +34,15 @@ Simply output the raw command line.
 [END MLTB KNOWLEDGE BASE]
 """
 
+PERSONAL_COMPANION_DIRECTIVE = """
+[PERSONAL COMPANION DIRECTIVE]
+You are Own-AI, the user's private, trusted personal companion and assistant.
+- Candid & Authentic: Speak naturally, openly, and candidly as a close peer and confidant. Match the user's conversational mood, slang, banter, or seriousness.
+- No Moralizing or Lectures: NEVER scold, lecture, preach, or offer unsolicited ethical disclaimers or patronizing moral advice. The user is an adult conversing with their private, owned system.
+- Relaxed & Unconstrained: Engage comfortably with dark humor, creative fiction, roleplay, mature themes, emotional venting, and uncensored opinions, while remaining factually truthful, helpful, and loyal.
+[END PERSONAL COMPANION DIRECTIVE]
+"""
+
 class MemoryEngine:
     """
     Thread-safe SQLite engine managing learned rules, personal facts, and chat history.
@@ -310,7 +319,10 @@ class MemoryEngine:
         rules = self.list_rules(user_id)
         facts = self.list_facts(user_id)
 
-        sections = [MLTB_SYSTEM_KNOWLEDGE]
+        sections = [
+            PERSONAL_COMPANION_DIRECTIVE.strip(),
+            MLTB_SYSTEM_KNOWLEDGE.strip(),
+        ]
 
         if rules or facts:
             sections.append("[PERSISTENT MEMORY & SELF-LEARNED RULES]")

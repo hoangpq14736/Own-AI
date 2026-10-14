@@ -114,3 +114,27 @@ async def test_generate_multimodal_unrecoverable_error(mock_genai_client):
     result = await client.generate_multimodal(prompt="Hello")
     assert "Error communicating with Gemini API" in result
     assert "403 Forbidden" in result
+
+def test_safety_settings_block_none():
+    from google.genai import types
+    client = GeminiClient(api_key="test-key")
+    settings = client._get_safety_settings()
+    assert len(settings) == 5
+    for s in settings:
+        assert s.threshold == types.HarmBlockThreshold.BLOCK_NONE
+
+@pytest.mark.anyio
+async def test_generate_multimodal_safety_toggle(mock_genai_client):
+    # With safety filters disabled (default)
+    client_disabled = GeminiClient(api_key="test-key", client=mock_genai_client, disable_safety_filters=True)
+    await client_disabled.generate_multimodal(prompt="Test prompt")
+    call_kwargs = mock_genai_client.models.generate_content.call_args.kwargs
+    assert call_kwargs["config"].safety_settings is not None
+    assert len(call_kwargs["config"].safety_settings) == 5
+
+    # With safety filters enabled
+    client_enabled = GeminiClient(api_key="test-key", client=mock_genai_client, disable_safety_filters=False)
+    await client_enabled.generate_multimodal(prompt="Test prompt")
+    call_kwargs2 = mock_genai_client.models.generate_content.call_args.kwargs
+    assert call_kwargs2["config"].safety_settings is None
+
