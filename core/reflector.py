@@ -29,17 +29,43 @@ LEARNING_TRIGGERS_REGEX = re.compile(
     re.IGNORECASE
 )
 
+CONFIRMATION_REGEX = re.compile(
+    r"\b("
+    r"yes|yeah|yep|sure|ok|okay|okie|agree|confirm|"
+    r"đúng|đúng rồi|đúng nè|đúng đó|chốt|chốt luôn|chốt nhé|đồng ý|nhất trí|chuẩn|chính xác|ừ|uhm|lưu|lưu đi|làm vậy đi"
+    r")\b",
+    re.IGNORECASE
+)
+
+ASSISTANT_PROPOSAL_REGEX = re.compile(
+    r"\b("
+    r"ghi nhớ|mặc định|lưu vào|quy tắc|từ giờ trở đi|thư mục này|chốt luôn|"
+    r"remember|default|rule|save to|from now on"
+    r")\b",
+    re.IGNORECASE
+)
+
+ASSISTANT_CONFIRMATION_REGEX = re.compile(
+    r"\b("
+    r"đã ghi nhớ|đã ghi nhận|chốt quy tắc|từ giờ.*sẽ tự động|"
+    r"i have remembered|noted.*from now on|saved this rule"
+    r")\b",
+    re.IGNORECASE
+)
+
 REFLECTION_PROMPT = """
 You are an intelligent Memory & Self-Learning Engine.
-Your job is to analyze the user's latest message to determine if the user is:
+Your job is to analyze the conversation turn to determine if the user is:
 1. Correcting the assistant ("No, that's wrong", "Don't do X, do Y instead").
 2. Giving a persistent preference or rule ("Always answer in Vietnamese", "Be concise", "Use bullet points").
-3. Sharing a lasting personal fact ("My name is Alex", "I am a cloud architect", "I live in Vietnam").
+3. Confirming or agreeing to a proposed rule or default setting suggested by the assistant (e.g. Assistant: 'Do you want me to save music to Gdrive:/Mirror/Music by default?', User: 'Yes / Đúng rồi / Chốt luôn').
+4. Sharing a lasting personal fact ("My name is Alex", "I am a cloud architect", "I live in Vietnam").
 
 If the user is just asking normal questions, chatting, or saying hello, DO NOT extract anything.
 
 User's Latest Message: "{user_message}"
 Assistant's Prior Response: "{last_assistant_response}"
+Assistant's Current Response: "{current_assistant_response}"
 
 Respond strictly with a valid JSON object matching this schema:
 {{
@@ -60,22 +86,43 @@ class Reflector:
         self.client = gemini_client
         self.memory = memory_engine
 
-    def should_trigger_reflection(self, user_message: str) -> bool:
+    def should_trigger_reflection(
+        self,
+        user_message: str,
+        last_assistant_response: str = "",
+        current_assistant_response: str = ""
+    ) -> bool:
         """
         Smart Pre-Filter:
-        Only triggers reflection if the user's message contains learning, preference,
-        or correction signals. Normal queries (e.g. 'what is 2+2') bypass reflection completely,
-        ensuring casual chats use strictly 1 API call.
+        Only triggers reflection if:
+        1. The user's message contains learning, preference, or correction signals.
+        2. The user confirms an assistant's proposed rule or default setting (e.g. "đúng rồi nè", "chốt luôn").
+        3. The assistant's current response explicitly affirms that a rule was recorded.
+        Normal queries (e.g. 'what is 2+2') bypass reflection completely, ensuring casual chats use strictly 1 API call.
         """
-        if not user_message or len(user_message.strip()) < 3:
+        if not user_message or len(user_message.strip()) < 2:
             return False
-        return bool(LEARNING_TRIGGERS_REGEX.search(user_message))
+
+        # Direct user learning / correction trigger
+        if bool(LEARNING_TRIGGERS_REGEX.search(user_message)):
+            return True
+
+        # Conversational confirmation to an assistant rule proposal
+        if bool(CONFIRMATION_REGEX.search(user_message)) and bool(ASSISTANT_PROPOSAL_REGEX.search(last_assistant_response)):
+            return True
+
+        # Assistant explicitly affirmed in its current reply that a rule was recorded
+        if bool(ASSISTANT_CONFIRMATION_REGEX.search(current_assistant_response)):
+            return True
+
+        return False
 
     async def reflect_and_learn(
         self,
         user_id: str,
         user_message: str,
-        last_assistant_response: str = ""
+        last_assistant_response: str = "",
+        current_assistant_response: str = ""
     ) -> Optional[ReflectionResult]:
         """
         Asynchronously analyzes a conversation turn and saves any new rule or fact to SQLite.
@@ -85,7 +132,11 @@ class Reflector:
         if not user_id or not user_id.strip():
             return None
 
-        if not self.should_trigger_reflection(user_message):
+        if not self.should_trigger_reflection(
+            user_message=user_message,
+            last_assistant_response=last_assistant_response,
+            current_assistant_response=current_assistant_response
+        ):
             return None
 
         clean_uid = user_id.strip()
@@ -93,7 +144,8 @@ class Reflector:
 
         prompt = REFLECTION_PROMPT.format(
             user_message=user_message,
-            last_assistant_response=last_assistant_response
+            last_assistant_response=last_assistant_response,
+            current_assistant_response=current_assistant_response
         )
 
         try:

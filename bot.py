@@ -497,12 +497,13 @@ async def clear_history_command(update: Update, context: ContextTypes.DEFAULT_TY
 
 # --- Background Self-Learning Worker (Smart 1-Request Filter) ---
 
-async def background_reflection_task(bot, chat_id: int, user_id: str, prompt: str, assistant_response: str):
+async def background_reflection_task(bot, chat_id: int, user_id: str, prompt: str, assistant_response: str, current_assistant_response: str = ""):
     try:
         learned_item = await reflector.reflect_and_learn(
             user_id=user_id,
             user_message=prompt,
-            last_assistant_response=assistant_response
+            last_assistant_response=assistant_response,
+            current_assistant_response=current_assistant_response
         )
         if learned_item and learned_item.should_learn:
             if learned_item.type == "rule":
@@ -683,14 +684,19 @@ async def handle_multimodal_message(
             logger.warning(f"Failed to send voice reply: {e}")
 
     # 10. Background Reflection (Pre-filtered: Only fires if learning signals detected)
-    if reflector.should_trigger_reflection(effective_prompt):
+    if reflector.should_trigger_reflection(
+        user_message=effective_prompt,
+        last_assistant_response=last_assistant_msg,
+        current_assistant_response=response
+    ):
         asyncio.create_task(
             background_reflection_task(
                 bot=context.bot,
                 chat_id=update.effective_chat.id,
                 user_id=user_id,
                 prompt=effective_prompt,
-                assistant_response=last_assistant_msg
+                assistant_response=last_assistant_msg,
+                current_assistant_response=response
             )
         )
 

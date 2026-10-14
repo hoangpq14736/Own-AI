@@ -140,9 +140,55 @@ def test_should_trigger_reflection(setup_reflector):
     assert reflector.should_trigger_reflection("Nhớ rằng đừng bao giờ dùng dấu chấm than") is True
     assert reflector.should_trigger_reflection("nên nhớ, khi nào tôi bảo đó là nhạc âm thanh thì lưu ở mục Gdrive:/Mirror/Musics") is True
 
+    # Conversational confirmations to an assistant proposal
+    assert reflector.should_trigger_reflection(
+        user_message="đúng rồi nè",
+        last_assistant_response="Bạn có muốn mình ghi nhớ luôn thư mục Gdrive:/Mirror/Documents làm mặc định cho các file tài liệu từ giờ trở đi không?"
+    ) is True
+    assert reflector.should_trigger_reflection(
+        user_message="chốt luôn gái ơi. cám ơn gái nhiều",
+        last_assistant_response="Bạn có muốn mình chốt luôn thư mục Gdrive:/Mirror/Music làm mặc định cho các file âm thanh từ giờ trở đi không?"
+    ) is True
+    assert reflector.should_trigger_reflection(
+        user_message="ok em",
+        current_assistant_response="Đã ghi nhớ! Từ bây giờ, đối với các file tài liệu, mình sẽ tự động thêm cờ -up Gdrive:/Mirror/Documents."
+    ) is True
+
     # Should NOT trigger (normal chat)
     assert reflector.should_trigger_reflection("what is the weather today?") is False
     assert reflector.should_trigger_reflection("how does photosynthesis work?") is False
     assert reflector.should_trigger_reflection("hello bot") is False
     assert reflector.should_trigger_reflection("") is False
     assert reflector.should_trigger_reflection("hi") is False
+
+
+@pytest.mark.anyio
+async def test_reflector_extracts_rule_from_conversational_confirmation(setup_reflector):
+    reflector, mock_client, memory = setup_reflector
+    user_id = "test_user_confirm"
+
+    mock_client.generate_multimodal.return_value = """
+    {
+      "should_learn": true,
+      "type": "rule",
+      "content": "Save document files to Gdrive:/Mirror/Documents using the -up flag",
+      "category": "behavior",
+      "trigger_context": "when downloading documents"
+    }
+    """
+
+    result = await reflector.reflect_and_learn(
+        user_id=user_id,
+        user_message="đúng rồi nè",
+        last_assistant_response="Bạn có muốn mình ghi nhớ luôn thư mục Gdrive:/Mirror/Documents làm mặc định cho các file tài liệu từ giờ trở đi không?",
+        current_assistant_response="Đã ghi nhớ! Từ bây giờ, đối với các file tài liệu mình sẽ tự động thêm cờ -up Gdrive:/Mirror/Documents."
+    )
+
+    assert result is not None
+    assert result.type == "rule"
+    assert "Gdrive:/Mirror/Documents" in result.content
+
+    rules = memory.list_rules(user_id)
+    assert len(rules) == 1
+    assert "Gdrive:/Mirror/Documents" in rules[0].rule
+
