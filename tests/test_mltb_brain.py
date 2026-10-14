@@ -53,6 +53,52 @@ async def test_rename_and_custom_rclone_remote(mock_gemini):
     assert "-up backup:ISOs" in cmd
 
 @pytest.mark.asyncio
+async def test_ytdl_best_audio_format(mock_gemini):
+    response_mock = MagicMock()
+    response_mock.text = json.dumps({
+        "is_mltb_intent": True,
+        "command": "/ytdlleech",
+        "fullCommand": "/ytdlleech https://youtu.be/music opt: format=bestaudio/best",
+        "explanation": "Leech audio with best sound format"
+    })
+    mock_gemini.client.aio.models.generate_content = AsyncMock(return_value=response_mock)
+
+    prompt = "tải nhạc này về với định dạng âm thanh tốt nhất: https://youtu.be/music"
+    cmd, exp = await translate_natural_language_to_mltb(mock_gemini, prompt)
+
+    assert "/ytdlleech" in cmd
+    assert "opt: format=bestaudio/best" in cmd
+
+@pytest.mark.asyncio
+async def test_ytdl_best_video_and_2k_formats(mock_gemini):
+    # Test 2K
+    response_mock = MagicMock()
+    response_mock.text = json.dumps({
+        "is_mltb_intent": True,
+        "command": "/ytdlleech",
+        "fullCommand": "/ytdlleech https://youtu.be/video opt: format=bv*[height<=1440]+ba/b",
+        "explanation": "Leech 2K video"
+    })
+    mock_gemini.client.aio.models.generate_content = AsyncMock(return_value=response_mock)
+
+    prompt = "tải video này với định dạng 2k: https://youtu.be/video"
+    cmd, exp = await translate_natural_language_to_mltb(mock_gemini, prompt)
+
+    assert "height<=1440" in cmd
+
+    # Test Best Video
+    response_mock.text = json.dumps({
+        "is_mltb_intent": True,
+        "command": "/ytdlleech",
+        "fullCommand": "/ytdlleech https://youtu.be/video opt: format=bv*+ba/b",
+        "explanation": "Leech best video"
+    })
+    prompt = "tải video này với định dạng video tốt nhất: https://youtu.be/video"
+    cmd, exp = await translate_natural_language_to_mltb(mock_gemini, prompt)
+
+    assert "format=bv*+ba/b" in cmd
+
+@pytest.mark.asyncio
 async def test_general_chat_not_triggered(mock_gemini):
     response_mock = MagicMock()
     response_mock.text = json.dumps({

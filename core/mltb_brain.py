@@ -64,13 +64,46 @@ Convert the user's conversational message (English, Vietnamese, or shorthand) in
    - -au <user:pass>: HTTP/FTP authentication
    - -h <header:value>: Custom HTTP headers
 
+8. YTDL Options (via opt: or -opt):
+   anasty17 MLTB accepts yt-dlp arguments formatted as "opt: key=val,key2=val2" or "opt: format=...".
+   - Best Audio / Music:
+     opt: format=bestaudio/best
+   - Best Video / Highest Quality:
+     opt: format=bv*+ba/b
+   - 4K Resolution (2160p):
+     opt: format=bv*[height<=2160]+ba/b
+   - 2K Resolution (1440p):
+     opt: format=bv*[height<=1440]+ba/b
+   - 1080p Full HD:
+     opt: format=bv*[height<=1080]+ba/b
+   - 720p HD:
+     opt: format=bv*[height<=720]+ba/b
+   - 480p SD:
+     opt: format=bv*[height<=480]+ba/b
+   - MP3 Extraction:
+     opt: format=bestaudio/best,postprocessors=[{'key':'FFmpegExtractAudio','preferredcodec':'mp3','preferredquality':'320'}]
+   - Subtitles (Vietnamese / English):
+     opt: writesubtitles=True,subtitleslangs=['vi','en'],embedsubtitles=True
+   - Playlist Selection:
+     opt: playlist_items=1-5
+   - Single Video Only (ignore playlist):
+     opt: noplaylist=True
+
 RULES:
 - If the user's message is general chat, programming questions, or non-MLTB conversation, set "is_mltb_intent" to false.
 - Respect any user memory rules provided (e.g. default upload remote, preferred engines, naming rules).
+- Destination: Default to /ytdlleech (Telegram) unless user specifically mentions cloud, drive, rclone, or mirror (/ytdl).
+- Format & Quality Mapping:
+  * "âm thanh tốt nhất", "tải nhạc", "nhạc tốt nhất", "audio tốt nhất", "best audio" -> use "opt: format=bestaudio/best"
+  * "video tốt nhất", "định dạng video tốt nhất", "chất lượng cao nhất", "best video" -> use "opt: format=bv*+ba/b"
+  * "định dạng 2k", "chất lượng 2k", "2k", "1440p" -> use "opt: format=bv*[height<=1440]+ba/b"
+  * "định dạng 4k", "chất lượng 4k", "4k", "2160p" -> use "opt: format=bv*[height<=2160]+ba/b"
+  * "1080p", "full hd" -> use "opt: format=bv*[height<=1080]+ba/b"
+  * "720p", "hd" -> use "opt: format=bv*[height<=720]+ba/b"
 - Return JSON ONLY with keys:
   "is_mltb_intent": bool,
-  "command": base command (e.g. "/qbunzipmirror"),
-  "fullCommand": complete command with URL and flags (e.g. "/qbunzipmirror magnet:... -n Film.mkv -up gdrive:Movies"),
+  "command": base command (e.g. "/ytdlleech"),
+  "fullCommand": complete command with URL and flags (e.g. "/ytdlleech https://... opt: format=bestaudio/best"),
   "explanation": concise 1-line reason in the user's language
 """
 
