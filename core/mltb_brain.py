@@ -66,39 +66,43 @@ Convert the user's conversational message (English, Vietnamese, or shorthand) in
    - -p <password>: Archive password for password-protected archives (zip, rar, 7z)
    - -i <indices>: Direct file selection indices for torrents (e.g. -i 1,3,5 or -i 1-4)
 
-8. YTDL Options (via opt: or -opt):
-   anasty17 MLTB accepts yt-dlp arguments formatted as "opt: key=val,key2=val2" or "opt: format=...".
+8. YTDL Options (-opt):
+   anasty17 MLTB evaluates `-opt` as a Python dictionary via eval().
+   Syntax MUST BE `-opt {"format":"..."}`.
    - Best Audio / Music:
-     opt: format=bestaudio/best
+     -opt {"format":"bestaudio/best"}
    - Best Video / Highest Quality:
-     opt: format=bv*+ba/b
+     -opt {"format":"bv*+ba/b"}
    - 4K Resolution (2160p):
-     opt: format=bv*[height<=2160]+ba/b
+     -opt {"format":"bv*[height<=2160]+ba/b"}
    - 2K Resolution (1440p):
-     opt: format=bv*[height<=1440]+ba/b
+     -opt {"format":"bv*[height<=1440]+ba/b"}
    - 1080p Full HD:
-     opt: format=bv*[height<=1080]+ba/b
+     -opt {"format":"bv*[height<=1080]+ba/b"}
    - 720p HD:
-     opt: format=bv*[height<=720]+ba/b
+     -opt {"format":"bv*[height<=720]+ba/b"}
    - 480p SD:
-     opt: format=bv*[height<=480]+ba/b
+     -opt {"format":"bv*[height<=480]+ba/b"}
    - MP3 Extraction:
-     opt: format=bestaudio/best,postprocessors=[{'key':'FFmpegExtractAudio','preferredcodec':'mp3','preferredquality':'320'}]
+     -opt {"format":"bestaudio/best","postprocessors":[{"key":"FFmpegExtractAudio","preferredcodec":"mp3","preferredquality":"320"}]}
    - Subtitles (Vietnamese / English):
-     opt: writesubtitles=True,subtitleslangs=['vi','en'],embedsubtitles=True
+     -opt {"writesubtitles":True,"subtitleslangs":["vi","en"],"embedsubtitles":True}
    - Playlist Selection:
-     opt: playlist_items=1-5
+     -opt {"playlist_items":"1-5"}
    - Single Video Only (ignore playlist):
-     opt: noplaylist=True
+     -opt {"noplaylist":True}
 
 RULES:
 - If the user's message is general chat, programming questions, or non-MLTB conversation, set "is_mltb_intent" to false.
 - Respect any user memory rules provided (e.g. default upload remote, preferred engines, naming rules).
+- YouTube URL Cleaning:
+  * If a YouTube link has "watch?v=..." and contains mix/radio parameters like "&list=RD..." or "&start_radio=1" or "&index=...", strip those query parameters so MLTB downloads only the single target video and does NOT trigger the playlist quality selection menu.
+  * Only preserve the "&list=..." parameter if the user explicitly requested a playlist, full album, or batch download.
 - Mirror vs Leech Destination:
   * Default to Telegram Leech (/leech, /unzipleech, /zipleech, /qbleech, /ytdlleech) unless user specifically mentions cloud, drive, rclone, or mirror (/mirror, /unzipmirror, /zipmirror, /qbmirror, /ytdl).
   * Torrent / Magnet: Prefer qBit engine (/qbleech or /qbmirror) for torrents unless aria2 is specified.
 - Archive Extraction & Compression:
-  * "giải nén", "unzip", "extract", "xả nén" -> /unzipleech or /unzipmirror (or add flag -uz)
+  * "giải nén", "unzip", "extract", "xả nén" -> /unzipleech or /unzipmirror (or add flag -uz / -e)
   * "nén zip", "nén lại", "pack zip", "zip" -> /zipleech or /zipmirror (or add flag -z)
   * "mật khẩu", "mật mã", "pass là" <pwd> -> add flag -p <pwd>
 - Advanced Flags:
@@ -118,18 +122,70 @@ RULES:
   * "đếm dung lượng drive", "count" -> /count <url>
   * "clone drive", "copy drive" -> /clone <url>
 - Format & Quality Mapping:
-  * "âm thanh tốt nhất", "tải nhạc", "nhạc tốt nhất", "audio tốt nhất", "best audio" -> use "opt: format=bestaudio/best"
-  * "video tốt nhất", "định dạng video tốt nhất", "chất lượng cao nhất", "best video" -> use "opt: format=bv*+ba/b"
-  * "định dạng 2k", "chất lượng 2k", "2k", "1440p" -> use "opt: format=bv*[height<=1440]+ba/b"
-  * "định dạng 4k", "chất lượng 4k", "4k", "2160p" -> use "opt: format=bv*[height<=2160]+ba/b"
-  * "1080p", "full hd" -> use "opt: format=bv*[height<=1080]+ba/b"
-  * "720p", "hd" -> use "opt: format=bv*[height<=720]+ba/b"
+  * "âm thanh tốt nhất", "tải nhạc", "nhạc tốt nhất", "audio tốt nhất", "best audio" -> use -opt {"format":"bestaudio/best"}
+  * "video tốt nhất", "định dạng video tốt nhất", "chất lượng cao nhất", "best video" -> use -opt {"format":"bv*+ba/b"}
+  * "định dạng 2k", "chất lượng 2k", "2k", "1440p" -> use -opt {"format":"bv*[height<=1440]+ba/b"}
+  * "định dạng 4k", "chất lượng 4k", "4k", "2160p" -> use -opt {"format":"bv*[height<=2160]+ba/b"}
+  * "1080p", "full hd" -> use -opt {"format":"bv*[height<=1080]+ba/b"}
+  * "720p", "hd" -> use -opt {"format":"bv*[height<=720]+ba/b"}
 - Return JSON ONLY with keys:
   "is_mltb_intent": bool,
-  "command": base command (e.g. "/qbunzipleech"),
-  "fullCommand": complete command with URL and flags (e.g. "/qbunzipleech magnet:... -n Film.mkv -s"),
+  "command": base command (e.g. "/ytdlleech"),
+  "fullCommand": complete command with URL and flags (e.g. '/ytdlleech https://www.youtube.com/watch?v=XYZ -opt {"format":"bv*+ba/b"}'),
   "explanation": concise 1-line reason in the user's language
 """
+
+import re
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+
+def sanitize_mltb_urls(cmd: str, user_prompt: str) -> str:
+    """
+    Strips YouTube radio/mix parameters and unwanted playlist queries from watch URLs
+    unless the user explicitly asked for an entire playlist.
+    """
+    is_playlist_explicit = any(k in user_prompt.lower() for k in [
+        "playlist", "danh sách phát", "danh sách bài hát", "cả album", "toàn bộ album", "toàn bộ playlist", "full playlist"
+    ])
+
+    def _replace_url(match):
+        url = match.group(0)
+        parsed = urlparse(url)
+        if "youtube.com" in parsed.netloc and "watch" in parsed.path:
+            qs = parse_qs(parsed.query)
+            has_radio = any(l.startswith(("RD", "UL")) for l in qs.get("list", []))
+            if has_radio or not is_playlist_explicit:
+                qs.pop("list", None)
+            qs.pop("start_radio", None)
+            qs.pop("index", None)
+            qs.pop("pp", None)
+            qs.pop("si", None)
+            qs.pop("feature", None)
+            new_query = urlencode(qs, doseq=True)
+            return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
+        elif "youtu.be" in parsed.netloc:
+            qs = parse_qs(parsed.query)
+            qs.pop("si", None)
+            qs.pop("feature", None)
+            new_query = urlencode(qs, doseq=True)
+            return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
+        return url
+
+    return re.sub(r"https?://[^\s]+", _replace_url, cmd)
+
+
+def normalize_ytdl_options(cmd: str) -> str:
+    """
+    Normalizes any legacy yt-dlp format options (e.g. 'opt: format=...' or '-opt format:...')
+    into anasty17 MLTB's native Python dictionary syntax '-opt {"format":"..."}'.
+    """
+    # Pattern 1: opt: format=XYZ -> -opt {"format":"XYZ"}
+    cmd = re.sub(r"opt:\s*format=([^\s]+)", r'-opt {"format":"\1"}', cmd)
+    # Pattern 2: -opt format:([^\s]+) -> -opt {"format":"\1"}
+    cmd = re.sub(r"-opt\s+format:([^\s]+)", r'-opt {"format":"\1"}', cmd)
+    # Pattern 3: -opt format=([^\s]+) -> -opt {"format":"\1"}
+    cmd = re.sub(r"-opt\s+format=([^\s]+)", r'-opt {"format":"\1"}', cmd)
+    return cmd
+
 
 async def translate_natural_language_to_mltb(
     gemini_client,
@@ -177,7 +233,10 @@ async def translate_natural_language_to_mltb(
         )
         data = json.loads(response.text)
         if data.get("is_mltb_intent") and data.get("fullCommand"):
-            return data["fullCommand"], data.get("explanation", "")
+            cmd = data["fullCommand"]
+            cmd = sanitize_mltb_urls(cmd, user_prompt)
+            cmd = normalize_ytdl_options(cmd)
+            return cmd, data.get("explanation", "")
     except Exception as e:
         logger.error(f"[MLTB Brain] Gemini parsing error: {e}")
 
