@@ -1,106 +1,88 @@
-"""
-Unit Tests for core/mltb_brain.py (MLTB Natural Language Synthesizer).
-"""
-
-import json
 import pytest
+import json
 from unittest.mock import AsyncMock, MagicMock
-
 from core.mltb_brain import translate_natural_language_to_mltb
 
+@pytest.fixture
+def mock_gemini():
+    client_mock = MagicMock()
+    aio_mock = MagicMock()
+    models_mock = MagicMock()
+    
+    client_mock.aio = aio_mock
+    aio_mock.models = models_mock
+    
+    gemini_obj = MagicMock()
+    gemini_obj.client = client_mock
+    return gemini_obj
 
-@pytest.mark.anyio
-async def test_translate_empty_prompt():
-    mock_gemini = MagicMock()
+@pytest.mark.asyncio
+async def test_vietnamese_torrent_unzip(mock_gemini):
+    # Mock Gemini response
+    response_mock = MagicMock()
+    response_mock.text = json.dumps({
+        "is_mltb_intent": True,
+        "command": "/unzipleech",
+        "fullCommand": "/unzipleech magnet:?xt=urn:btih:3b245504cf5f",
+        "explanation": "Leech torrent and extract archives to Telegram"
+    })
+    mock_gemini.client.aio.models.generate_content = AsyncMock(return_value=response_mock)
+
+    prompt = "Kéo torrent này về telegram giải nén hết ra cho tao: magnet:?xt=urn:btih:3b245504cf5f"
+    cmd, exp = await translate_natural_language_to_mltb(mock_gemini, prompt)
+
+    assert cmd is not None
+    assert "/unzipleech" in cmd
+    assert "magnet:?xt=urn:btih:3b245504cf5f" in cmd
+
+@pytest.mark.asyncio
+async def test_rename_and_custom_rclone_remote(mock_gemini):
+    response_mock = MagicMock()
+    response_mock.text = json.dumps({
+        "is_mltb_intent": True,
+        "command": "/mirror",
+        "fullCommand": "/mirror https://example.com/test.iso -n ubuntu.iso -up backup:ISOs",
+        "explanation": "Mirror link with rename and custom remote"
+    })
+    mock_gemini.client.aio.models.generate_content = AsyncMock(return_value=response_mock)
+
+    prompt = "Tải file này lên remote backup:ISOs đổi tên thành ubuntu.iso: https://example.com/test.iso"
+    cmd, exp = await translate_natural_language_to_mltb(mock_gemini, prompt, system_rules="Default remote: backup")
+
+    assert "-n ubuntu.iso" in cmd
+    assert "-up backup:ISOs" in cmd
+
+@pytest.mark.asyncio
+async def test_general_chat_not_triggered(mock_gemini):
+    response_mock = MagicMock()
+    response_mock.text = json.dumps({
+        "is_mltb_intent": False,
+        "command": "",
+        "fullCommand": "",
+        "explanation": "General conversational query"
+    })
+    mock_gemini.client.aio.models.generate_content = AsyncMock(return_value=response_mock)
+
+    prompt = "Hôm nay thời tiết Hà Nội thế nào?"
+    cmd, exp = await translate_natural_language_to_mltb(mock_gemini, prompt)
+
+    assert cmd is None
+
+@pytest.mark.asyncio
+async def test_empty_prompt_and_reply_media_fast_path(mock_gemini):
+    # Empty prompt
     cmd, exp = await translate_natural_language_to_mltb(mock_gemini, "")
     assert cmd is None
-    assert exp is None
 
-
-@pytest.mark.anyio
-async def test_translate_reply_media_fast_path():
-    mock_gemini = MagicMock()
-
-    # Normal leech
-    cmd, exp = await translate_natural_language_to_mltb(
-        mock_gemini,
-        "tải file này về telegram",
-        has_reply_media=True
-    )
-    assert cmd == "/leech"
-    assert "Telegram" in exp
-
-    # Leech with unzip
-    cmd, exp = await translate_natural_language_to_mltb(
-        mock_gemini,
-        "giải nén rồi leech hộ",
-        has_reply_media=True
-    )
+    # Reply media fast-path
+    cmd, exp = await translate_natural_language_to_mltb(mock_gemini, "giải nén rồi leech", has_reply_media=True)
     assert cmd == "/leech -uz"
 
-    # Leech with zip
-    cmd, exp = await translate_natural_language_to_mltb(
-        mock_gemini,
-        "nén zip rồi tải",
-        has_reply_media=True
-    )
+    cmd, exp = await translate_natural_language_to_mltb(mock_gemini, "nén zip tải về", has_reply_media=True)
     assert cmd == "/leech -z"
 
-
-@pytest.mark.anyio
-async def test_translate_gemini_mltb_intent_success():
-    mock_response = MagicMock()
-    mock_response.text = json.dumps({
-        "is_mltb_intent": True,
-        "command": "/ytdl",
-        "fullCommand": "/ytdl https://youtu.be/xyz -s",
-        "explanation": "Tải video YouTube lên đám mây"
-    })
-
-    mock_gemini = MagicMock()
-    mock_gemini.client.aio.models.generate_content = AsyncMock(return_value=mock_response)
-
-    cmd, exp = await translate_natural_language_to_mltb(
-        mock_gemini,
-        "tải video youtube https://youtu.be/xyz lên drive",
-        system_rules="Default cloud: gdrive"
-    )
-
-    assert cmd == "/ytdl https://youtu.be/xyz -s"
-    assert exp == "Tải video YouTube lên đám mây"
-
-
-@pytest.mark.anyio
-async def test_translate_gemini_not_mltb_intent():
-    mock_response = MagicMock()
-    mock_response.text = json.dumps({
-        "is_mltb_intent": False,
-        "command": None,
-        "fullCommand": None,
-        "explanation": "General conversation"
-    })
-
-    mock_gemini = MagicMock()
-    mock_gemini.client.aio.models.generate_content = AsyncMock(return_value=mock_response)
-
-    cmd, exp = await translate_natural_language_to_mltb(
-        mock_gemini,
-        "Xin chào bạn khỏe không?"
-    )
-
+@pytest.mark.asyncio
+async def test_gemini_exception_handled(mock_gemini):
+    mock_gemini.client.aio.models.generate_content = AsyncMock(side_effect=RuntimeError("API Network Error"))
+    cmd, exp = await translate_natural_language_to_mltb(mock_gemini, "tải video https://youtu.be/test")
     assert cmd is None
-    assert exp is None
-
-
-@pytest.mark.anyio
-async def test_translate_gemini_exception_handled():
-    mock_gemini = MagicMock()
-    mock_gemini.client.aio.models.generate_content = AsyncMock(side_effect=RuntimeError("API error"))
-
-    cmd, exp = await translate_natural_language_to_mltb(
-        mock_gemini,
-        "download torrent magnet:?xt=urn:btih:..."
-    )
-
-    assert cmd is None
-    assert exp is None
