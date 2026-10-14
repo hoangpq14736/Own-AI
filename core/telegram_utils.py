@@ -97,7 +97,7 @@ def extract_mltb_command(
     """
     # 1. Check if AI response contains an MLTB command
     if text:
-        match = re.search(r"/(leech|mirror|clone|ytdl)\b[^\n\r`]*", text, re.IGNORECASE)
+        match = re.search(r"(?<![:/\w])/(leech|mirror|clone|ytdl)\b(?:\s+[^\n\r`]*|$)", text, re.IGNORECASE)
         if match:
             cmd = match.group(0).strip()
             # Clean trailing backticks, quotes, or markdown

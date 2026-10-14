@@ -23,7 +23,7 @@ LEARNING_TRIGGERS_REGEX = re.compile(
     r"when i|for me|my favorite|my preference|"
     # Vietnamese triggers
     r"tôi là|mình là|tên tôi|tên mình|tôi ở|tôi sống|tôi làm|từ giờ|từ nay|"
-    r"nhớ là|nhớ rằng|luôn luôn|đừng|không được|thay vì|sai rồi|không phải|"
+    r"nhớ là|nhớ rằng|nên nhớ|hãy nhớ|ghi nhớ|lưu ý|khi nào tôi|luôn luôn|đừng|không được|thay vì|sai rồi|không phải|"
     r"gọi tôi là|quy tắc|sở thích|thích|ghét"
     r")\b",
     re.IGNORECASE

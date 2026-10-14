@@ -138,6 +138,7 @@ def test_should_trigger_reflection(setup_reflector):
     assert reflector.should_trigger_reflection("from now on always use bullet points") is True
     assert reflector.should_trigger_reflection("Tôi là kỹ sư đám mây") is True
     assert reflector.should_trigger_reflection("Nhớ rằng đừng bao giờ dùng dấu chấm than") is True
+    assert reflector.should_trigger_reflection("nên nhớ, khi nào tôi bảo đó là nhạc âm thanh thì lưu ở mục Gdrive:/Mirror/Musics") is True
 
     # Should NOT trigger (normal chat)
     assert reflector.should_trigger_reflection("what is the weather today?") is False

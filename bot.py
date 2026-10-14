@@ -667,44 +667,8 @@ async def handle_multimodal_message(
         except Exception as e:
             logger.warning(f"Failed to delete local file {media_path}: {e}")
 
-    # 8. Deliver response
-    mltb_ai_cmd = extract_mltb_command(text=response)
-    if mltb_ai_cmd:
-        target_chat = resolve_mltb_target(
-            current_chat_id=update.effective_chat.id,
-            chat_type=chat_type,
-            mltb_target=config.settings.mltb_target_chat,
-            admin_chat_id=config.settings.get_admin_chat_id(),
-        )
-        if userbot.is_connected and target_chat:
-            reply_id = update.message.message_id if target_chat == update.effective_chat.id else None
-            dispatched = await userbot.send_command(
-                chat_id=target_chat,
-                command=mltb_ai_cmd,
-                reply_to_msg_id=reply_id,
-            )
-            if dispatched:
-                dest_name = f"@{str(target_chat).lstrip('@')}" if str(target_chat).startswith("@") else "Control Room"
-                if target_chat == update.effective_chat.id:
-                    msg_text = f"⚡ *Auto-dispatched to MLTB:*\n`{mltb_ai_cmd}`\n\n*(Sent via your user account)*"
-                else:
-                    msg_text = f"⚡ *Auto-dispatched to MLTB ({dest_name}):*\n`{mltb_ai_cmd}`\n\n*(Sent via your user account to {dest_name})*"
-                await update.message.reply_text(
-                    msg_text,
-                    parse_mode=constants.ParseMode.MARKDOWN,
-                )
-            else:
-                await update.message.reply_text(
-                    f"📋 *Tap to copy for MLTB:*\n`{mltb_ai_cmd}`\n\n*(Tap above to copy & send)*",
-                    parse_mode=constants.ParseMode.MARKDOWN,
-                )
-        else:
-            await update.message.reply_text(
-                f"📋 *Tap to copy for MLTB:*\n`{mltb_ai_cmd}`\n\n*(Telegram blocks bot-to-bot commands; tap above to copy & send, or set up `/userbot`!)*",
-                parse_mode=constants.ParseMode.MARKDOWN,
-            )
-    else:
-        await send_safe_response(update.message, response)
+    # 8. Deliver conversational response
+    await send_safe_response(update.message, response)
 
     # 9. Voice Reply if triggered by audio input
     if reply_with_voice:

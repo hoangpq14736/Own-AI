@@ -107,6 +107,11 @@ def test_extract_mltb_command_from_text():
     text3 = "Sure, I can help you with your coding problem!"
     assert extract_mltb_command(text=text3) is None
 
+    # Paths containing /mirror or /leech should NOT be extracted as commands
+    assert extract_mltb_command(text="Gdrive:/Mirror/Musics") is None
+    assert extract_mltb_command(text="nên nhớ, khi nào tôi bảo đó là nhạc âm thanh thì lưu ở mục Gdrive:/Mirror/Musics") is None
+    assert extract_mltb_command(text="/Mirror/Musics") is None
+
 
 def test_extract_mltb_command_from_user_prompt():
     # Direct user prompt with URL
