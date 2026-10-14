@@ -4,6 +4,7 @@ Implements prompt boundary validation, dependency injection, and clean resource 
 """
 
 import asyncio
+import base64
 import re
 import uuid
 import time
@@ -215,11 +216,12 @@ async def text_to_speech(
     text: str,
     output_path: Optional[Path] = None,
     preferred_voice: Optional[str] = None,
+    client: Optional[Any] = None,
     communicator_factory=None
 ) -> Optional[Path]:
     """
-    Converts text to realistic human speech using Microsoft Neural Voices (edge-tts).
-    Automatically detects Vietnamese vs English and validates text limits.
+    Converts text to realistic human speech using Google Gemini TTS (gemini-3.8-flash-tts).
+    Supports 130+ languages including Vietnamese, with fallback to edge-tts if needed.
     """
     if not text or not text.strip():
         return None
@@ -233,23 +235,56 @@ async def text_to_speech(
     if len(clean_text) > MAX_TTS_TEXT_LEN:
         clean_text = clean_text[:MAX_TTS_TEXT_LEN] + "..."
 
-    if VIETNAMESE_REGEX.search(clean_text):
-        primary_voice = "vi-VN-HoaiMyNeural"
-        fallback_voice = "vi-VN-NamMinhNeural"
-    else:
-        primary_voice = "en-US-AriaNeural"
-        fallback_voice = "en-US-GuyNeural"
-
-    if preferred_voice:
-        primary_voice = preferred_voice
+    voice_name = preferred_voice or "Kore"
 
     if not output_path:
-        output_path = config.MEDIA_DIR / f"voice_{uuid.uuid4().hex[:8]}.mp3"
+        output_path = config.MEDIA_DIR / f"voice_{uuid.uuid4().hex[:8]}.wav"
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    candidates = [primary_voice, fallback_voice, "en-US-AriaNeural"]
-    for v in dict.fromkeys(candidates):
+    # 1. Primary Engine: Google Gemini TTS
+    ai_client = client if client is not None else get_google_client()
+    if ai_client and hasattr(ai_client, "interactions") and not communicator_factory:
+        for model in ["gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"]:
+            try:
+                interaction = await asyncio.to_thread(
+                    ai_client.interactions.create,
+                    model=model,
+                    input=[{
+                        "type": "user_input",
+                        "content": [{
+                            "type": "text",
+                            "text": clean_text,
+                        }],
+                    }],
+                    response_format={"type": "audio"},
+                    generation_config={
+                        "speech_config": [{"voice": voice_name}]
+                    }
+                )
+                if interaction.output_audio and hasattr(interaction.output_audio, "data"):
+                    audio_bytes = base64.b64decode(interaction.output_audio.data)
+                    output_path.write_bytes(audio_bytes)
+                    if output_path.exists() and output_path.stat().st_size > 0:
+                        logger.info(f"Generated speech with Google Gemini TTS ({model}, {voice_name})")
+                        return output_path
+            except Exception as e:
+                logger.warning(f"Google Gemini TTS with {model} failed: {e}. Trying fallback...")
+
+    # 2. Secondary Fallback: Edge-TTS (or mock communicator_factory in unit tests)
+    if VIETNAMESE_REGEX.search(clean_text):
+        edge_primary = "vi-VN-HoaiMyNeural"
+        edge_fallback = "vi-VN-NamMinhNeural"
+    else:
+        edge_primary = "en-US-AriaNeural"
+        edge_fallback = "en-US-GuyNeural"
+
+    if preferred_voice:
+        edge_candidates = [preferred_voice, edge_primary, edge_fallback, "en-US-AriaNeural"]
+    else:
+        edge_candidates = [edge_primary, edge_fallback, "en-US-AriaNeural"]
+
+    for v in dict.fromkeys(edge_candidates):
         try:
             if communicator_factory:
                 communicate = communicator_factory(clean_text, v)
@@ -258,9 +293,11 @@ async def text_to_speech(
 
             await communicate.save(str(output_path))
             if output_path.exists() and output_path.stat().st_size > 0:
+                logger.info(f"Generated speech with Edge-TTS fallback ({v})")
                 return output_path
         except Exception as e:
             logger.warning(f"TTS voice {v} failed: {e}. Trying fallback...")
 
     logger.error("All TTS voice options failed.")
     return None
+

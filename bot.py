@@ -458,7 +458,12 @@ async def speak_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     audio_path = await text_to_speech(text)
     if audio_path and audio_path.exists():
         with open(audio_path, "rb") as f:
-            await update.message.reply_voice(voice=f, read_timeout=60, write_timeout=60)
+            try:
+                await update.message.reply_voice(voice=f, read_timeout=60, write_timeout=60)
+            except Exception as ve:
+                logger.info(f"reply_voice fallback to reply_audio: {ve}")
+                f.seek(0)
+                await update.message.reply_audio(audio=f, read_timeout=60, write_timeout=60)
         try:
             audio_path.unlink()
         except Exception:
@@ -724,7 +729,12 @@ async def handle_multimodal_message(
             audio_reply_path = await text_to_speech(response)
             if audio_reply_path and audio_reply_path.exists():
                 with open(audio_reply_path, "rb") as f:
-                    await update.message.reply_voice(voice=f, read_timeout=60, write_timeout=60)
+                    try:
+                        await update.message.reply_voice(voice=f, read_timeout=60, write_timeout=60)
+                    except Exception as ve:
+                        logger.info(f"reply_voice fallback to reply_audio: {ve}")
+                        f.seek(0)
+                        await update.message.reply_audio(audio=f, read_timeout=60, write_timeout=60)
                 audio_reply_path.unlink()
         except Exception as e:
             logger.warning(f"Failed to send voice reply: {e}")

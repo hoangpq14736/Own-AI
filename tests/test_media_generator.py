@@ -1,4 +1,5 @@
 import pytest
+import base64
 from unittest.mock import MagicMock, AsyncMock, patch
 from pathlib import Path
 
@@ -224,3 +225,27 @@ async def test_text_to_speech_empty():
     assert res is None
     res_space = await text_to_speech("   ***   ")
     assert res_space is None
+
+@pytest.mark.anyio
+async def test_text_to_speech_gemini_tts(tmp_path):
+    mock_client = MagicMock()
+    mock_interaction = MagicMock()
+    mock_interaction.output_audio.data = base64.b64encode(b"RIFFfakeaudio").decode("utf-8")
+    mock_client.interactions.create.return_value = mock_interaction
+
+    out_file = tmp_path / "gemini_voice.wav"
+    res = await text_to_speech(
+        "Xin chào bạn nhé",
+        output_path=out_file,
+        preferred_voice="Kore",
+        client=mock_client
+    )
+
+    assert res is not None
+    assert res.exists()
+    assert res.read_bytes() == b"RIFFfakeaudio"
+    assert mock_client.interactions.create.called
+    call_kwargs = mock_client.interactions.create.call_args.kwargs
+    assert call_kwargs["model"] == "gemini-3.8-flash-tts"
+    assert call_kwargs["generation_config"]["speech_config"] == [{"voice": "Kore"}]
+
