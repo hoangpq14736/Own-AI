@@ -3,13 +3,14 @@ Multimodal Media Generation Module (Image, Video, Neural TTS).
 Implements prompt boundary validation, dependency injection, and clean resource management per ECC.
 """
 
+from __future__ import annotations
 import asyncio
 import base64
 import re
 import uuid
 import time
 from pathlib import Path
-from typing import Optional, Callable
+from typing import Optional, Callable, Any
 import logging
 
 try:
