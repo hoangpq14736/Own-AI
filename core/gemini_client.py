@@ -106,6 +106,15 @@ class GeminiClient:
             config=config
         )
 
+        # 1. Check if the prompt itself was blocked by Google Gemini
+        prompt_fb = getattr(response, "prompt_feedback", None)
+        if prompt_fb is not None and "Mock" not in type(prompt_fb).__name__:
+            block_reason = getattr(prompt_fb, "block_reason", None)
+            if block_reason is not None and "Mock" not in type(block_reason).__name__:
+                block_name = str(getattr(block_reason, "name", block_reason))
+                logger.warning(f"Prompt was blocked by Google Gemini: {block_name}")
+                return f"⚠️ PROMPT_BLOCKED:{block_name}"
+
         main_text = getattr(response, "text", "") or ""
 
         # Fallback to direct candidate parts if response.text returned None/empty
@@ -227,8 +236,28 @@ class GeminiClient:
                         system_instruction,
                         enable_search,
                     )
+                    # If prompt was blocked and chat history was included, auto-retry without history
+                    if result.startswith("⚠️ PROMPT_BLOCKED:") and history_context:
+                        logger.info(f"Model {candidate} prompt blocked with chat history. Retrying with current prompt only...")
+                        clean_contents = [prompt if prompt else "Please analyze this."]
+                        retry_res = await asyncio.to_thread(
+                            self._sync_generate,
+                            candidate,
+                            clean_contents,
+                            system_instruction,
+                            enable_search,
+                        )
+                        if retry_res and not retry_res.startswith("⚠️ PROMPT_BLOCKED:") and not retry_res.startswith("Received empty response"):
+                            return retry_res
+                        result = retry_res
+
                     # If valid response is returned, return it
-                    if result and not result.startswith("Received empty response") and not result.startswith("⚠️ Phản hồi bị"):
+                    if (
+                        result
+                        and not result.startswith("Received empty response")
+                        and not result.startswith("⚠️ Phản hồi bị")
+                        and not result.startswith("⚠️ PROMPT_BLOCKED:")
+                    ):
                         return result
 
                     logger.warning(f"Model {candidate} returned empty/blocked response ('{result[:60]}'). Trying fallback...")
@@ -243,6 +272,12 @@ class GeminiClient:
                         raise e
 
             if last_empty_result:
+                if last_empty_result.startswith("⚠️ PROMPT_BLOCKED:"):
+                    reason = last_empty_result.replace("⚠️ PROMPT_BLOCKED:", "").strip()
+                    return (
+                        f"⚠️ Yêu cầu bị Google Gemini từ chối (Lý do: {reason}).\n\n"
+                        f"👉 Gõ `/clear` để xóa ngữ cảnh trò chuyện cũ hoặc thử diễn đạt lại câu hỏi."
+                    )
                 return last_empty_result
 
             if last_err:

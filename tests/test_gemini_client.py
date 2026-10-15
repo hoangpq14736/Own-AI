@@ -208,4 +208,34 @@ async def test_generate_multimodal_parts_text_extraction(mock_genai_client):
     res = await client.generate_multimodal(prompt="Test parts")
     assert res == "Part 1 Part 2"
 
+@pytest.mark.anyio
+async def test_generate_multimodal_prompt_blocked_retry_without_history(mock_genai_client):
+    client = GeminiClient(api_key="test-key", client=mock_genai_client)
+
+    # First call with history gets blocked
+    class RealBlockReason:
+        name = "SAFETY"
+    class RealPromptFeedback:
+        block_reason = RealBlockReason()
+
+    blocked_res = MagicMock()
+    blocked_res.prompt_feedback = RealPromptFeedback()
+    blocked_res.text = None
+    blocked_res.candidates = []
+
+    # Second call (retry with clean prompt) succeeds
+    success_res = MagicMock()
+    success_res.prompt_feedback = None
+    success_res.text = "Clean prompt succeeded!"
+    success_res.candidates = [MagicMock()]
+
+    mock_genai_client.models.generate_content.side_effect = [blocked_res, success_res]
+
+    res = await client.generate_multimodal(
+        prompt="Tell me about dogs",
+        chat_history=[{"role": "user", "content": "edgy question"}]
+    )
+    assert res == "Clean prompt succeeded!"
+    assert mock_genai_client.models.generate_content.call_count == 2
+
 
