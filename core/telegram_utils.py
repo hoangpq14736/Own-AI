@@ -219,8 +219,9 @@ SEARCH_TRIGGERS = [
     "kết quả bóng đá", "lịch thi đấu", "bảng xếp hạng", "tỷ số trận",
     # Recency & freshness
     "mới nhất", "vừa ra mắt", "đang chiếu rạp", "hot nhất hiện nay", "gần đây nhất",
+    "có gì mới", "tin mới", "hôm nay có gì", "sự kiện mới",
     # English triggers
-    "who won", "latest news", "current price", "weather in", "look up",
+    "who won", "latest news", "current price", "weather in", "look up", "what's new",
 ]
 
 

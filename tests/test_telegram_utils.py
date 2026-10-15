@@ -266,6 +266,7 @@ def test_should_enable_search_triggers():
     assert should_enable_search("kết quả bóng đá ngoại hạng anh đêm qua") is True
     assert should_enable_search("phim chiếu rạp mới nhất") is True
     assert should_enable_search("phim người lớn hot nhất hiện nay") is True
+    assert should_enable_search("Phú Quốc hôm nay có gì mới") is True
 
     # Non-search conversational messages
     assert should_enable_search("hôm nay tôi mệt quá") is False

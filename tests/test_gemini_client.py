@@ -170,4 +170,42 @@ async def test_generate_multimodal_search_grounding(mock_genai_client):
     call_kwargs_no_search = mock_genai_client.models.generate_content.call_args.kwargs
     assert call_kwargs_no_search["config"].tools is None
 
+@pytest.mark.anyio
+async def test_generate_multimodal_empty_response_fallback(mock_genai_client):
+    client = GeminiClient(api_key="test-key", client=mock_genai_client)
+
+    # First call returns response with empty text, second returns valid text
+    empty_res = MagicMock()
+    empty_res.text = ""
+    empty_res.candidates = []
+
+    valid_res = MagicMock()
+    valid_res.text = "Second model succeeded!"
+    valid_res.candidates = [MagicMock()]
+
+    mock_genai_client.models.generate_content.side_effect = [empty_res, valid_res]
+
+    res = await client.generate_multimodal(prompt="Test empty")
+    assert res == "Second model succeeded!"
+    assert mock_genai_client.models.generate_content.call_count == 2
+
+@pytest.mark.anyio
+async def test_generate_multimodal_parts_text_extraction(mock_genai_client):
+    client = GeminiClient(api_key="test-key", client=mock_genai_client)
+
+    # Response where response.text is None, but parts have text
+    resp = MagicMock()
+    resp.text = None
+    part1 = MagicMock(text="Part 1 ")
+    part2 = MagicMock(text="Part 2")
+    cand = MagicMock()
+    cand.content.parts = [part1, part2]
+    cand.finish_reason = "STOP"
+    resp.candidates = [cand]
+
+    mock_genai_client.models.generate_content.return_value = resp
+
+    res = await client.generate_multimodal(prompt="Test parts")
+    assert res == "Part 1 Part 2"
+
 

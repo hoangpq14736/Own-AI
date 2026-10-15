@@ -106,7 +106,31 @@ class GeminiClient:
             config=config
         )
 
-        main_text = getattr(response, "text", "") or "Received empty response."
+        main_text = getattr(response, "text", "") or ""
+
+        # Fallback to direct candidate parts if response.text returned None/empty
+        if not main_text and hasattr(response, "candidates") and response.candidates:
+            cand = response.candidates[0]
+            if getattr(cand, "content", None) and getattr(cand.content, "parts", None):
+                parts_text = [getattr(p, "text", "") for p in cand.content.parts if getattr(p, "text", "")]
+                if parts_text:
+                    main_text = "".join(parts_text)
+
+            if not main_text:
+                finish_reason = getattr(cand, "finish_reason", None)
+                finish_name = getattr(finish_reason, "name", str(finish_reason)) if finish_reason else "UNKNOWN"
+                logger.warning(f"Gemini candidate returned empty text (finish_reason: {finish_name})")
+                if finish_name == "SAFETY":
+                    main_text = "⚠️ Phản hồi bị bộ lọc an toàn của Google Gemini từ chối (FinishReason: SAFETY)."
+                elif finish_name == "MAX_TOKENS":
+                    main_text = "⚠️ Phản hồi bị ngắt do vượt giới hạn độ dài (FinishReason: MAX_TOKENS)."
+                elif finish_name == "RECITATION":
+                    main_text = "⚠️ Phản hồi bị chặn do phát hiện nội dung bản quyền (FinishReason: RECITATION)."
+                else:
+                    main_text = f"Received empty response from {model} (finish_reason: {finish_name})."
+
+        if not main_text:
+            main_text = f"Received empty response from {model}."
 
         # Format and append sources if search was enabled and grounding metadata exists
         if enable_search and hasattr(response, "candidates") and response.candidates:
@@ -193,6 +217,7 @@ class GeminiClient:
             candidates = [model_override] if model_override else list(dict.fromkeys(self.fallback_models))
 
             last_err = None
+            last_empty_result = None
             for candidate in candidates:
                 try:
                     result = await asyncio.to_thread(
@@ -202,15 +227,23 @@ class GeminiClient:
                         system_instruction,
                         enable_search,
                     )
-                    return result
+                    # If valid response is returned, return it
+                    if result and not result.startswith("Received empty response") and not result.startswith("⚠️ Phản hồi bị"):
+                        return result
+
+                    logger.warning(f"Model {candidate} returned empty/blocked response ('{result[:60]}'). Trying fallback...")
+                    last_empty_result = result
                 except Exception as e:
                     err_str = str(e)
-                    if any(code in err_str for code in ["503", "429", "high demand", "RESOURCE_EXHAUSTED"]):
-                        logger.warning(f"Model {candidate} busy/rate-limited. Trying fast fallback...")
+                    if any(code in err_str for code in ["503", "429", "high demand", "RESOURCE_EXHAUSTED", "404", "NOT_FOUND"]):
+                        logger.warning(f"Model {candidate} busy/unavailable ({err_str}). Trying fast fallback...")
                         last_err = e
                         continue
                     else:
                         raise e
+
+            if last_empty_result:
+                return last_empty_result
 
             if last_err:
                 raise last_err
