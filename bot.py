@@ -44,6 +44,9 @@ from core.reminder_parser import parse_reminder_text
 from core.web_reader import fetch_web_page
 from core.speedtest_manager import run_vps_speedtest
 from core.webhook_server import WebhookServer
+from core.dfam_analyzer import analyze_stl_file
+from core.gcode_parser import parse_gcode_file
+from core.printer_client import PrinterClient
 from core.scheduler import SchedulerService, create_daily_health_report, create_memory_backup
 from core.telegram_utils import (
     strip_bot_mention,
@@ -636,6 +639,93 @@ async def find_note_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await send_safe_response(update.message, header + "\n".join(lines))
 
+# --- 3D Maker & Anycubic Kobra Commands ---
+
+async def dfam_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Guides or inspects 3D models for Anycubic Kobra printability."""
+    if not is_authorized(update.effective_user.id):
+        return
+
+    replied = update.message.reply_to_message
+    if replied and replied.document:
+        doc = replied.document
+        suffix = (Path(doc.file_name).suffix if doc.file_name else "").lower()
+        if suffix in [".stl", ".3mf", ".obj"]:
+            file = await doc.get_file()
+            dest = config.MEDIA_DIR / f"{file.file_unique_id}{suffix}"
+            await file.download_to_drive(dest)
+            report = analyze_stl_file(
+                dest,
+                bed_x=config.settings.kobra_bed_x,
+                bed_y=config.settings.kobra_bed_y,
+                bed_z=config.settings.kobra_bed_z,
+            )
+            try:
+                dest.unlink()
+            except Exception:
+                pass
+            await update.message.reply_text(report.text, parse_mode=constants.ParseMode.MARKDOWN)
+            return
+
+    bed_info = f"{config.settings.kobra_bed_x}x{config.settings.kobra_bed_y}x{config.settings.kobra_bed_z} mm"
+    help_text = (
+        f"🖨️ **Kiểm Tra Khả Dụng In 3D (DfAM) - Anycubic Kobra**\n\n"
+        f"• **Bàn in hiện tại:** `{bed_info}`\n"
+        f"• **Cách dùng:** Gửi trực tiếp file `.stl` hoặc `.3mf` vào bot (hoặc reply file kèm lệnh `/dfam`).\n\n"
+        f"🔍 **Bot sẽ tự động tính toán:**\n"
+        f"1. Kích thước (X, Y, Z) xem có vừa bàn in Kobra không.\n"
+        f"2. Bóc tách góc nghiêng Overhang (> 45°), cảnh báo phần cần bật Support.\n"
+        f"3. Ước tính thể tích (cm³) và trọng lượng cuộn nhựa PLA (g)."
+    )
+    await update.message.reply_text(help_text, parse_mode=constants.ParseMode.MARKDOWN)
+
+async def gcode_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Guides or inspects G-code print jobs."""
+    if not is_authorized(update.effective_user.id):
+        return
+
+    replied = update.message.reply_to_message
+    if replied and replied.document:
+        doc = replied.document
+        suffix = (Path(doc.file_name).suffix if doc.file_name else "").lower()
+        if suffix == ".gcode":
+            file = await doc.get_file()
+            dest = config.MEDIA_DIR / f"{file.file_unique_id}{suffix}"
+            await file.download_to_drive(dest)
+            report = parse_gcode_file(dest)
+            try:
+                dest.unlink()
+            except Exception:
+                pass
+            await update.message.reply_text(report.text, parse_mode=constants.ParseMode.MARKDOWN)
+            return
+
+    help_text = (
+        "📄 **Kiểm Tra Thông Số File G-Code**\n\n"
+        "• **Cách dùng:** Gửi trực tiếp file `.gcode` đã cắt lát (từ OrcaSlicer, Anycubic Slicer, Cura...) vào bot.\n\n"
+        "🔍 **Bot sẽ tự động đọc:**\n"
+        "1. Thời gian in ước tính thực tế.\n"
+        "2. Chiều cao lớp in (Layer Height) và tổng số Layer.\n"
+        "3. Nhiệt độ đầu phun (Nozzle) và bàn in (Bed).\n"
+        "4. Chiều dài dây và khối lượng nhựa tiêu thụ."
+    )
+    await update.message.reply_text(help_text, parse_mode=constants.ParseMode.MARKDOWN)
+
+async def kobra_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Checks live status of Anycubic Kobra 3D printer."""
+    if not is_authorized(update.effective_user.id):
+        if update.effective_chat.type == constants.ChatType.PRIVATE:
+            await update.message.reply_text("⛔ Unauthorized.")
+        return
+
+    client = PrinterClient(
+        url=config.settings.printer_url,
+        api_type=config.settings.printer_api_type,
+        api_key=config.settings.printer_api_key,
+    )
+    status = await client.get_status()
+    await update.message.reply_text(status.text, parse_mode=constants.ParseMode.MARKDOWN)
+
 async def check_update_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Checks for new commits on the configured GitHub repository branch."""
     if not is_authorized(update.effective_user.id):
@@ -1174,11 +1264,38 @@ async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     doc = update.message.document
-    caption = update.message.caption or "Phân tích tài liệu này, trích xuất các ý chính, cấu trúc bảng biểu hoặc số liệu quan trọng và tóm tắt rõ ràng bằng tiếng Việt."
     file = await doc.get_file()
-    suffix = Path(doc.file_name).suffix if doc.file_name else ".pdf"
+    suffix = (Path(doc.file_name).suffix if doc.file_name else ".pdf").lower()
     dest = config.MEDIA_DIR / f"{file.file_unique_id}{suffix}"
     await file.download_to_drive(dest)
+
+    # 1. 3D Mesh DfAM Printability check for Anycubic Kobra
+    if suffix in [".stl", ".3mf", ".obj"]:
+        report = analyze_stl_file(
+            dest,
+            bed_x=config.settings.kobra_bed_x,
+            bed_y=config.settings.kobra_bed_y,
+            bed_z=config.settings.kobra_bed_z,
+        )
+        try:
+            dest.unlink()
+        except Exception:
+            pass
+        await update.message.reply_text(report.text, parse_mode=constants.ParseMode.MARKDOWN)
+        return
+
+    # 2. Sliced G-Code inspection
+    if suffix == ".gcode":
+        report = parse_gcode_file(dest)
+        try:
+            dest.unlink()
+        except Exception:
+            pass
+        await update.message.reply_text(report.text, parse_mode=constants.ParseMode.MARKDOWN)
+        return
+
+    # 3. Documents (PDF, text, code, etc.) routed to Gemini multimodal
+    caption = update.message.caption or "Phân tích tài liệu này, trích xuất các ý chính, cấu trúc bảng biểu hoặc số liệu quan trọng và tóm tắt rõ ràng bằng tiếng Việt."
     await handle_multimodal_message(update, context, media_path=dest, media_type="document", prompt_text=caption)
 
 
@@ -1194,6 +1311,9 @@ BOT_COMMANDS = [
     BotCommand("draw", "Generate image with Google Gemini"),
     BotCommand("video", "Generate cinematic video with Google Veo 3.1"),
     BotCommand("speak", "Speak text in bilingual neural voice"),
+    BotCommand("dfam", "Check 3D model printability for Anycubic Kobra"),
+    BotCommand("gcode", "Inspect sliced G-code print parameters"),
+    BotCommand("kobra", "Live status of Anycubic Kobra 3D printer"),
     BotCommand("rules", "View active learned rules and preferences"),
     BotCommand("delete_rule", "Remove a learned rule by ID"),
     BotCommand("clear_rules", "Clear all learned rules"),
@@ -1207,6 +1327,7 @@ BOT_COMMANDS = [
     BotCommand("update", "Pull latest updates from GitHub and restart"),
     BotCommand("userbot", "Check Userbot auto-dispatch status"),
 ]
+
 
 async def post_init_hook(application):
     """Registers slash commands for both Private Chats and Group Chats, starts scheduler and userbot, and notifies on restart."""
@@ -1347,6 +1468,13 @@ def main():
     app.add_handler(CommandHandler("image", draw_command))
     app.add_handler(CommandHandler("video", video_command))
     app.add_handler(CommandHandler("speak", speak_command))
+
+    # 3D Maker & Anycubic Kobra commands
+    app.add_handler(CommandHandler("dfam", dfam_command))
+    app.add_handler(CommandHandler("gcode", gcode_command))
+    app.add_handler(CommandHandler("kobra", kobra_command))
+    app.add_handler(CommandHandler("printer", kobra_command))
+
 
     # Memory & Rules commands
     app.add_handler(CommandHandler("rules", list_rules_command))

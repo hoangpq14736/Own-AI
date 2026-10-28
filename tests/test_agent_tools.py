@@ -14,9 +14,10 @@ from core.models import VPSMetrics
 
 def test_get_all_agent_tools():
     tools = get_all_agent_tools()
-    assert len(tools) == 6
+    assert len(tools) == 7
     for t in tools:
         assert callable(t)
+
 
 
 def test_get_vps_status():

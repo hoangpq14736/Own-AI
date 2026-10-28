@@ -47,6 +47,13 @@ class Settings(BaseModel):
     webhook_host: str = Field(default="0.0.0.0")
     webhook_port: int = Field(default=0)
     webhook_secret: str = Field(default="")
+    printer_url: str = Field(default="")
+    printer_api_type: str = Field(default="moonraker")
+    printer_api_key: str = Field(default="")
+    kobra_bed_x: float = Field(default=220.0)
+    kobra_bed_y: float = Field(default=220.0)
+    kobra_bed_z: float = Field(default=250.0)
+
 
 
     model_config = {
@@ -138,6 +145,12 @@ def load_settings_from_env() -> Settings:
     raw_webhook_port = os.getenv("WEBHOOK_PORT", "0").strip()
     webhook_port = int(raw_webhook_port) if raw_webhook_port.isdigit() else 0
     webhook_secret = os.getenv("WEBHOOK_SECRET", "").strip()
+    printer_url = os.getenv("PRINTER_URL", "").strip()
+    printer_api_type = os.getenv("PRINTER_API_TYPE", "moonraker").strip()
+    printer_api_key = os.getenv("PRINTER_API_KEY", "").strip()
+    kobra_bed_x = float(os.getenv("KOBRA_BED_X", "220.0").strip() or 220.0)
+    kobra_bed_y = float(os.getenv("KOBRA_BED_Y", "220.0").strip() or 220.0)
+    kobra_bed_z = float(os.getenv("KOBRA_BED_Z", "250.0").strip() or 250.0)
 
     return Settings(
         gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
@@ -165,7 +178,14 @@ def load_settings_from_env() -> Settings:
         webhook_host=webhook_host,
         webhook_port=webhook_port,
         webhook_secret=webhook_secret,
+        printer_url=printer_url,
+        printer_api_type=printer_api_type,
+        printer_api_key=printer_api_key,
+        kobra_bed_x=kobra_bed_x,
+        kobra_bed_y=kobra_bed_y,
+        kobra_bed_z=kobra_bed_z,
     )
+
 
 
 
@@ -194,6 +214,10 @@ ENABLE_SEARCH_GROUNDING = settings.enable_search_grounding
 WEBHOOK_HOST = settings.webhook_host
 WEBHOOK_PORT = settings.webhook_port
 WEBHOOK_SECRET = settings.webhook_secret
+PRINTER_URL = settings.printer_url
+PRINTER_API_TYPE = settings.printer_api_type
+PRINTER_API_KEY = settings.printer_api_key
+
 
 
 

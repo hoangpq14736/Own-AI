@@ -95,6 +95,26 @@ def search_personal_notes(keyword: str) -> str:
         return f"❌ Lỗi tìm kiếm ghi chú: {e}"
 
 
+def get_anycubic_kobra_status() -> str:
+    """Tra cứu trạng thái máy in 3D Anycubic Kobra: nhiệt độ đầu phun (nozzle), nhiệt độ bàn nhiệt (bed), tiến độ in % và thời gian."""
+    import asyncio
+    import config
+    from core.printer_client import PrinterClient
+    client = PrinterClient(
+        url=config.settings.printer_url,
+        api_type=config.settings.printer_api_type,
+        api_key=config.settings.printer_api_key,
+    )
+    try:
+        # If in active event loop, run with nest_asyncio or in thread
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            status = pool.submit(asyncio.run, client.get_status()).result(timeout=6.0)
+            return status.text
+    except Exception as e:
+        return f"Lỗi tra cứu máy in Anycubic Kobra: {e}"
+
+
 def get_all_agent_tools() -> List[Callable]:
     """Returns the list of callable functions for Gemini Function Calling."""
     return [
@@ -104,5 +124,7 @@ def get_all_agent_tools() -> List[Callable]:
         create_scheduled_reminder,
         save_personal_note,
         search_personal_notes,
+        get_anycubic_kobra_status,
     ]
+
 

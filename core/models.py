@@ -358,3 +358,82 @@ class Note:
             "embedding": self.embedding,
         }
 
+
+@dataclass(frozen=True)
+class DFAMReport:
+    """Immutable representation of a 3D Printability analysis report."""
+    file_name: str
+    triangles: int
+    size_x: float
+    size_y: float
+    size_z: float
+    fits_bed: bool
+    volume_cm3: float
+    weight_pla_g: float
+    overhang_ratio: float
+    needs_support: bool
+    text: str
+    error: Optional[str] = None
+
+    def __getitem__(self, key: Any) -> Any:
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            raise KeyError(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key, default)
+
+
+@dataclass(frozen=True)
+class GCodeReport:
+    """Immutable representation of parsed G-code print statistics."""
+    file_name: str
+    slicer: str
+    print_time: str
+    filament_length_m: float
+    filament_weight_g: float
+    filament_type: str
+    nozzle_temp: float
+    bed_temp: float
+    layer_height: float
+    total_layers: int
+    text: str
+    error: Optional[str] = None
+
+    def __getitem__(self, key: Any) -> Any:
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            raise KeyError(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key, default)
+
+
+@dataclass(frozen=True)
+class PrinterStatus:
+    """Immutable representation of 3D printer hardware telemetry."""
+    is_connected: bool
+    printer_name: str
+    state: str
+    nozzle_temp: float
+    nozzle_target: float
+    bed_temp: float
+    bed_target: float
+    progress_percent: float
+    time_elapsed_min: float
+    time_remaining_min: float
+    file_name: str
+    text: str
+
+    def __getitem__(self, key: Any) -> Any:
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            raise KeyError(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key, default)
+
+
