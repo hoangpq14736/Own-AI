@@ -302,3 +302,21 @@ class GeminiClient:
 
     # Backwards compatibility alias
     generate_text = generate_multimodal
+
+    async def get_embedding(self, text: str, model: str = "text-embedding-004") -> List[float]:
+        """Calculates vector embeddings for semantic search and memory indexing."""
+        if not self.client or not text or not text.strip():
+            return []
+        try:
+            response = await asyncio.to_thread(
+                self.client.models.embed_content,
+                model=model,
+                contents=text.strip(),
+            )
+            if response and getattr(response, "embeddings", None) and response.embeddings:
+                return list(response.embeddings[0].values)
+            return []
+        except Exception as e:
+            logger.warning(f"Failed to generate embedding for text: {e}")
+            return []
+

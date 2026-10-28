@@ -43,6 +43,7 @@ from core.agent_tools import set_agent_context, get_all_agent_tools
 from core.reminder_parser import parse_reminder_text
 from core.web_reader import fetch_web_page
 from core.speedtest_manager import run_vps_speedtest
+from core.webhook_server import WebhookServer
 from core.scheduler import SchedulerService, create_daily_health_report, create_memory_backup
 from core.telegram_utils import (
     strip_bot_mention,
@@ -520,6 +521,120 @@ async def speedtest_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await safe_edit_text(status_msg, result.text)
 
 # --- Repository Update & Maintenance Commands ---
+
+# --- Personal Note Vault & Semantic Search Commands ---
+
+async def note_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Saves a note/bookmark. Can be used standalone or by replying to any message."""
+    if not is_authorized(update.effective_user.id):
+        if update.effective_chat.type == constants.ChatType.PRIVATE:
+            await update.message.reply_text("⛔ Unauthorized.")
+        return
+
+    user_id = str(update.effective_user.id)
+    replied = update.message.reply_to_message
+
+    if replied and (replied.text or replied.caption):
+        note_text = (replied.text or replied.caption).strip()
+        extra_text = " ".join(context.args).strip() if context.args else ""
+        tags_list = re.findall(r"#\w+", extra_text)
+        tags = " ".join(tags_list)
+    elif context.args:
+        full_text = " ".join(context.args).strip()
+        tags_list = re.findall(r"#\w+", full_text)
+        tags = " ".join(tags_list)
+        note_text = full_text
+    else:
+        await update.message.reply_text(
+            "📌 *Cách dùng /note:*\n"
+            "• Lưu trực tiếp: `/note #devops Cấu hình swap 4GB trên Oracle VPS`\n"
+            "• Hoặc reply tin nhắn bất kỳ với `/note #tag` để lưu lại!",
+            parse_mode=constants.ParseMode.MARKDOWN
+        )
+        return
+
+    embedding = None
+    try:
+        embedding = await gemini.get_embedding(note_text)
+    except Exception as e:
+        logger.debug(f"Failed to generate embedding for note: {e}")
+
+    note_id = memory.add_note(user_id=user_id, text=note_text, tags=tags, embedding=embedding)
+    tags_str = f" `[{tags}]`" if tags else ""
+    snippet = note_text[:120] + ("..." if len(note_text) > 120 else "")
+    await update.message.reply_text(
+        f"💾 *Đã lưu ghi chú #{note_id} thành công!*{tags_str}\n\n"
+        f"_{snippet}_\n\n"
+        f"👉 Xem lại: `/notes` hoặc tìm kiếm: `/find_note <từ khóa>`",
+        parse_mode=constants.ParseMode.MARKDOWN
+    )
+
+async def list_notes_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Lists saved notes, optionally filtered by tag."""
+    if not is_authorized(update.effective_user.id):
+        return
+    user_id = str(update.effective_user.id)
+    tag = context.args[0] if context.args else None
+    notes = memory.list_notes(user_id=user_id, tag=tag, limit=10)
+
+    if not notes:
+        msg = f"Không tìm thấy ghi chú nào với thẻ `{tag}`." if tag else "Bạn chưa có ghi chú nào. Dùng `/note <nội dung>` để lưu!"
+        await update.message.reply_text(msg, parse_mode=constants.ParseMode.MARKDOWN)
+        return
+
+    header = f"📚 *Kho Ghi Chú Cá Nhân* ({f'Thẻ: {tag}' if tag else 'Mới nhất'}):\n\n"
+    lines = []
+    for n in notes:
+        tag_badge = f" `[{n.tags}]`" if n.tags else ""
+        snippet = n.text[:80] + ("..." if len(n.text) > 80 else "")
+        lines.append(f"• *#{n.id}*{tag_badge} {snippet}")
+
+    lines.append("\n👉 Xóa ghi chú: `/del_note <id>`\n👉 Tìm kiếm: `/find_note <nội dung>`")
+    await send_safe_response(update.message, header + "\n".join(lines))
+
+async def delete_note_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Deletes a saved note by ID."""
+    if not is_authorized(update.effective_user.id):
+        return
+    user_id = str(update.effective_user.id)
+    if not context.args or not context.args[0].isdigit():
+        await update.message.reply_text("Cách dùng: `/del_note <id>` (Ví dụ: `/del_note 1`)", parse_mode=constants.ParseMode.MARKDOWN)
+        return
+
+    note_id = int(context.args[0])
+    if memory.delete_note(note_id=note_id, user_id=user_id):
+        await update.message.reply_text(f"🗑️ Đã xóa ghi chú `#{note_id}`.", parse_mode=constants.ParseMode.MARKDOWN)
+    else:
+        await update.message.reply_text(f"❌ Không tìm thấy ghi chú `#{note_id}`.", parse_mode=constants.ParseMode.MARKDOWN)
+
+async def find_note_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Finds notes using semantic vector search and keyword match."""
+    if not is_authorized(update.effective_user.id):
+        return
+    user_id = str(update.effective_user.id)
+    if not context.args:
+        await update.message.reply_text("Cách dùng: `/find_note <từ khóa hoặc câu hỏi>`\nVí dụ: `/find_note swap vps`", parse_mode=constants.ParseMode.MARKDOWN)
+        return
+
+    query = " ".join(context.args).strip()
+    query_emb = None
+    try:
+        query_emb = await gemini.get_embedding(query)
+    except Exception as e:
+        logger.debug(f"Failed to generate query embedding: {e}")
+
+    notes = memory.search_notes(user_id=user_id, query=query, query_embedding=query_emb, top_k=5)
+    if not notes:
+        await update.message.reply_text(f"🔍 Không tìm thấy ghi chú nào khớp với: *{query}*.", parse_mode=constants.ParseMode.MARKDOWN)
+        return
+
+    header = f"🔍 *Kết quả tìm kiếm cho: \"{query}\"*\n\n"
+    lines = []
+    for n in notes:
+        tag_badge = f" `[{n.tags}]`" if n.tags else ""
+        lines.append(f"• *#{n.id}*{tag_badge}\n{n.text}\n")
+
+    await send_safe_response(update.message, header + "\n".join(lines))
 
 async def check_update_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Checks for new commits on the configured GitHub repository branch."""
@@ -1059,12 +1174,13 @@ async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     doc = update.message.document
-    caption = update.message.caption or "Analyze this document and summarize its key insights."
+    caption = update.message.caption or "Phân tích tài liệu này, trích xuất các ý chính, cấu trúc bảng biểu hoặc số liệu quan trọng và tóm tắt rõ ràng bằng tiếng Việt."
     file = await doc.get_file()
     suffix = Path(doc.file_name).suffix if doc.file_name else ".pdf"
     dest = config.MEDIA_DIR / f"{file.file_unique_id}{suffix}"
     await file.download_to_drive(dest)
     await handle_multimodal_message(update, context, media_path=dest, media_type="document", prompt_text=caption)
+
 
 BOT_COMMANDS = [
     BotCommand("start", "Welcome message and overview"),
@@ -1083,6 +1199,10 @@ BOT_COMMANDS = [
     BotCommand("clear_rules", "Clear all learned rules"),
     BotCommand("facts", "View remembered personal facts"),
     BotCommand("clear", "Reset short-term conversation context"),
+    BotCommand("note", "Save a note or bookmark (#tags supported)"),
+    BotCommand("notes", "View saved notes or filter by tag"),
+    BotCommand("find_note", "Semantic search across your saved notes"),
+    BotCommand("del_note", "Delete a saved note by ID"),
     BotCommand("check_update", "Check for updates from GitHub repository"),
     BotCommand("update", "Pull latest updates from GitHub and restart"),
     BotCommand("userbot", "Check Userbot auto-dispatch status"),
@@ -1105,6 +1225,30 @@ async def post_init_hook(application):
     )
     scheduler.start()
     application.bot_data["scheduler"] = scheduler
+
+    # Start Webhook Server if configured
+    if config.settings.webhook_port > 0:
+        logger.info(f"Initializing WebhookServer on {config.settings.webhook_host}:{config.settings.webhook_port}...")
+        async def on_download_webhook(msg_text: str):
+            admin_id = config.settings.get_admin_chat_id()
+            if admin_id:
+                try:
+                    await application.bot.send_message(
+                        chat_id=admin_id,
+                        text=msg_text,
+                        parse_mode=constants.ParseMode.MARKDOWN,
+                    )
+                except Exception as ex:
+                    logger.warning(f"Failed to send webhook message: {ex}")
+
+        webhook_server = WebhookServer(
+            host=config.settings.webhook_host,
+            port=config.settings.webhook_port,
+            secret=config.settings.webhook_secret,
+            notifier=on_download_webhook,
+        )
+        await webhook_server.start()
+        application.bot_data["webhook_server"] = webhook_server
 
     if userbot.is_configured:
         logger.info("Initializing Userbot client in background...")
@@ -1135,9 +1279,13 @@ async def post_init_hook(application):
                 logger.warning(f"Failed to send update restart notification: {e}")
 
 async def post_shutdown_hook(application):
-    """Disconnects Userbot upon bot shutdown."""
+    """Disconnects Userbot and WebhookServer upon bot shutdown."""
+    webhook_srv = application.bot_data.get("webhook_server")
+    if webhook_srv:
+        await webhook_srv.stop()
     if userbot.is_connected:
         await userbot.stop()
+
 
 def main():
     try:
@@ -1206,6 +1354,11 @@ def main():
     app.add_handler(CommandHandler("clear_rules", clear_rules_command))
     app.add_handler(CommandHandler("facts", list_facts_command))
     app.add_handler(CommandHandler("clear", clear_history_command))
+    app.add_handler(CommandHandler("note", note_command))
+    app.add_handler(CommandHandler("notes", list_notes_command))
+    app.add_handler(CommandHandler("find_note", find_note_command))
+    app.add_handler(CommandHandler("del_note", delete_note_command))
+
 
     # Media and message handlers
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))

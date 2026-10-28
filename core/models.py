@@ -322,3 +322,39 @@ class Reminder:
             "created_at": self.created_at,
             "is_completed": self.is_completed,
         }
+
+
+@dataclass(frozen=True)
+class Note:
+    """Immutable representation of a personal note or bookmark."""
+    id: int
+    user_id: str
+    text: str
+    tags: str = ""
+    created_at: str = ""
+    embedding: Optional[str] = None
+
+    def __getitem__(self, key: Any) -> Any:
+        if not isinstance(key, str):
+            raise TypeError(f"Key must be string, not {type(key).__name__}")
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            raise KeyError(key)
+
+    def __contains__(self, key: Any) -> bool:
+        return isinstance(key, str) and hasattr(self, key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key, default)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "text": self.text,
+            "tags": self.tags,
+            "created_at": self.created_at,
+            "embedding": self.embedding,
+        }
+

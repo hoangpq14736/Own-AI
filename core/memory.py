@@ -1,14 +1,28 @@
 import sqlite3
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 from contextlib import contextmanager
 import logging
 
-from core.models import LearnedRule, UserFact, ChatMessage, Reminder
+from core.models import LearnedRule, UserFact, ChatMessage, Reminder, Note
 from core.exceptions import ValidationError
 
 logger = logging.getLogger(__name__)
+
+
+def cosine_similarity(v1: List[float], v2: List[float]) -> float:
+    """Calculates cosine similarity between two vector lists."""
+    if not v1 or not v2 or len(v1) != len(v2):
+        return 0.0
+    dot = sum(a * b for a, b in zip(v1, v2))
+    norm1 = sum(a * a for a in v1) ** 0.5
+    norm2 = sum(b * b for b in v2) ** 0.5
+    if norm1 == 0.0 or norm2 == 0.0:
+        return 0.0
+    return dot / (norm1 * norm2)
+
 
 MLTB_SYSTEM_KNOWLEDGE = """
 [MLTB KNOWLEDGE BASE]
@@ -110,6 +124,22 @@ class MemoryEngine:
                     is_completed INTEGER NOT NULL DEFAULT 0
                 )
             """)
+            # Personal notes and bookmarks
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS notes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    text TEXT NOT NULL,
+                    tags TEXT NOT NULL DEFAULT '',
+                    embedding TEXT,
+                    created_at TEXT NOT NULL
+                )
+            """)
+            # Ensure embedding column exists in user_facts for semantic RAG
+            try:
+                cursor.execute("ALTER TABLE user_facts ADD COLUMN embedding TEXT")
+            except sqlite3.OperationalError:
+                pass  # column already exists
             conn.commit()
 
     # --- Rules Management ---
@@ -209,18 +239,19 @@ class MemoryEngine:
 
     # --- Facts Management ---
 
-    def add_fact(self, user_id: str, fact: str) -> int:
-        """Saves a personal fact about the user."""
+    def add_fact(self, user_id: str, fact: str, embedding: Optional[List[float]] = None) -> int:
+        """Saves a personal fact about the user, optionally with embedding vector."""
         if not user_id or not user_id.strip():
             raise ValidationError("user_id cannot be empty.")
         if not fact or not fact.strip():
             raise ValidationError("fact content cannot be empty.")
 
+        emb_json = json.dumps(embedding) if embedding else None
         with self._connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO user_facts (user_id, fact, created_at) VALUES (?, ?, ?)",
-                (user_id.strip(), fact.strip(), self._now_iso())
+                "INSERT INTO user_facts (user_id, fact, embedding, created_at) VALUES (?, ?, ?, ?)",
+                (user_id.strip(), fact.strip(), emb_json, self._now_iso())
             )
             conn.commit()
             return cursor.lastrowid
@@ -237,6 +268,39 @@ class MemoryEngine:
                 (user_id.strip(),)
             )
             return [row["fact"] for row in cursor.fetchall()]
+
+    def search_facts_semantic(
+        self,
+        user_id: str,
+        query_embedding: List[float],
+        top_k: int = 5,
+        min_score: float = 0.4
+    ) -> List[str]:
+        """Returns the most semantically relevant facts using cosine similarity."""
+        if not user_id or not user_id.strip() or not query_embedding:
+            return []
+
+        with self._connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT fact, embedding FROM user_facts WHERE user_id = ? AND embedding IS NOT NULL",
+                (user_id.strip(),)
+            )
+            rows = cursor.fetchall()
+
+        scored_facts = []
+        for r in rows:
+            try:
+                emb = json.loads(r["embedding"])
+                score = cosine_similarity(query_embedding, emb)
+                if score >= min_score:
+                    scored_facts.append((score, r["fact"]))
+            except Exception:
+                continue
+
+        scored_facts.sort(key=lambda x: x[0], reverse=True)
+        return [f for _, f in scored_facts[:top_k]]
+
 
     def list_facts_detailed(self, user_id: str) -> List[UserFact]:
         """Returns list of facts as immutable UserFact objects."""
@@ -325,10 +389,19 @@ class MemoryEngine:
 
     # --- Prompt Synthesis ---
 
-    def build_memory_system_prompt(self, user_id: str) -> str:
-        """Constructs the prompt containing active learned rules and user facts."""
+    def build_memory_system_prompt(
+        self,
+        user_id: str,
+        query_embedding: Optional[List[float]] = None
+    ) -> str:
+        """Constructs the prompt containing active learned rules and user facts (optionally RAG filtered)."""
         rules = self.list_rules(user_id)
-        facts = self.list_facts(user_id)
+        if query_embedding:
+            facts = self.search_facts_semantic(user_id, query_embedding, top_k=5)
+            if not facts:
+                facts = self.list_facts(user_id)[:5]
+        else:
+            facts = self.list_facts(user_id)
 
         sections = [
             PERSONAL_COMPANION_DIRECTIVE.strip(),
@@ -353,6 +426,7 @@ class MemoryEngine:
             sections.append("[END PERSISTENT MEMORY]\n")
 
         return "\n".join(sections)
+
 
     # --- Reminders Management ---
 
@@ -446,3 +520,163 @@ class MemoryEngine:
             """, (reminder_id, user_id))
             conn.commit()
             return cursor.rowcount > 0
+
+    # --- Notes Management ---
+
+    def add_note(
+        self,
+        user_id: str,
+        text: str,
+        tags: str = "",
+        embedding: Optional[List[float]] = None
+    ) -> int:
+        """Saves a new note or bookmark with optional tags and vector embedding."""
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id cannot be empty.")
+        if not text or not text.strip():
+            raise ValidationError("note text cannot be empty.")
+
+        emb_json = json.dumps(embedding) if embedding else None
+        now_iso = self._now_iso()
+        with self._connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO notes (user_id, text, tags, embedding, created_at)
+                VALUES (?, ?, ?, ?, ?)
+            """, (user_id.strip(), text.strip(), tags.strip(), emb_json, now_iso))
+            conn.commit()
+            return cursor.lastrowid
+
+    def list_notes(
+        self,
+        user_id: str,
+        tag: Optional[str] = None,
+        limit: int = 20
+    ) -> List[Note]:
+        """Lists notes for a specific user, optionally filtered by tag."""
+        if not user_id or not user_id.strip():
+            return []
+
+        query = "SELECT id, user_id, text, tags, embedding, created_at FROM notes WHERE user_id = ?"
+        params: list = [user_id.strip()]
+
+        if tag and tag.strip():
+            query += " AND tags LIKE ?"
+            params.append(f"%{tag.strip()}%")
+
+        query += " ORDER BY id DESC LIMIT ?"
+        params.append(limit)
+
+        with self._connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, tuple(params))
+            rows = cursor.fetchall()
+            return [
+                Note(
+                    id=row["id"],
+                    user_id=row["user_id"],
+                    text=row["text"],
+                    tags=row["tags"],
+                    embedding=row["embedding"],
+                    created_at=row["created_at"],
+                )
+                for row in rows
+            ]
+
+    def get_note(self, note_id: int, user_id: str) -> Optional[Note]:
+        """Fetches a specific note by ID."""
+        with self._connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, user_id, text, tags, embedding, created_at FROM notes WHERE id = ? AND user_id = ?",
+                (note_id, user_id.strip())
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return Note(
+                id=row["id"],
+                user_id=row["user_id"],
+                text=row["text"],
+                tags=row["tags"],
+                embedding=row["embedding"],
+                created_at=row["created_at"],
+            )
+
+    def delete_note(self, note_id: int, user_id: str) -> bool:
+        """Deletes a note for a specific user."""
+        with self._connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM notes WHERE id = ? AND user_id = ?", (note_id, user_id.strip()))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def search_notes(
+        self,
+        user_id: str,
+        query: str = "",
+        query_embedding: Optional[List[float]] = None,
+        top_k: int = 5
+    ) -> List[Note]:
+        """Searches notes by vector similarity if query_embedding is provided, or text substring."""
+        if not user_id or not user_id.strip():
+            return []
+
+        # Vector semantic search
+        if query_embedding:
+            with self._connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT id, user_id, text, tags, embedding, created_at FROM notes WHERE user_id = ? AND embedding IS NOT NULL",
+                    (user_id.strip(),)
+                )
+                rows = cursor.fetchall()
+
+            scored = []
+            for r in rows:
+                try:
+                    emb = json.loads(r["embedding"])
+                    score = cosine_similarity(query_embedding, emb)
+                    scored.append((score, r))
+                except Exception:
+                    continue
+
+            scored.sort(key=lambda x: x[0], reverse=True)
+            return [
+                Note(
+                    id=r["id"],
+                    user_id=r["user_id"],
+                    text=r["text"],
+                    tags=r["tags"],
+                    embedding=r["embedding"],
+                    created_at=r["created_at"],
+                )
+                for score, r in scored[:top_k] if score > 0.3
+            ]
+
+        # Text fallback search
+        q = f"%{query.strip()}%" if query.strip() else "%"
+        with self._connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, user_id, text, tags, embedding, created_at 
+                FROM notes 
+                WHERE user_id = ? AND (text LIKE ? OR tags LIKE ?) 
+                ORDER BY id DESC LIMIT ?
+                """,
+                (user_id.strip(), q, q, top_k)
+            )
+            rows = cursor.fetchall()
+            return [
+                Note(
+                    id=row["id"],
+                    user_id=row["user_id"],
+                    text=row["text"],
+                    tags=row["tags"],
+                    embedding=row["embedding"],
+                    created_at=row["created_at"],
+                )
+                for row in rows
+            ]
+

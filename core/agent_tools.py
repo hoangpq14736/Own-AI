@@ -70,6 +70,31 @@ def create_scheduled_reminder(task: str, remind_at_text: str) -> str:
         return f"❌ Lỗi khi đặt nhắc nhở: {str(e)}"
 
 
+def save_personal_note(content: str, tags: str = "") -> str:
+    """Lưu một ghi chú cá nhân, mã cấu hình, liên kết hoặc đoạn văn bản quan trọng vào kho ghi chú của người dùng."""
+    if not _CURRENT_MEMORY_ENGINE or not _CURRENT_USER_ID:
+        return "⚠️ Không thể lưu ghi chú: Ngữ cảnh người dùng chưa được khởi tạo."
+    try:
+        note_id = _CURRENT_MEMORY_ENGINE.add_note(user_id=_CURRENT_USER_ID, text=content, tags=tags)
+        return f"✅ Đã lưu ghi chú #{note_id} thành công với thẻ [{tags}]: '{content[:50]}...'"
+    except Exception as e:
+        return f"❌ Lỗi khi lưu ghi chú: {e}"
+
+
+def search_personal_notes(keyword: str) -> str:
+    """Tìm kiếm trong danh sách ghi chú cá nhân hoặc bookmark của người dùng theo từ khóa hoặc chủ đề."""
+    if not _CURRENT_MEMORY_ENGINE or not _CURRENT_USER_ID:
+        return "⚠️ Không thể tìm kiếm ghi chú: Ngữ cảnh người dùng chưa được khởi tạo."
+    try:
+        notes = _CURRENT_MEMORY_ENGINE.search_notes(user_id=_CURRENT_USER_ID, query=keyword, top_k=5)
+        if not notes:
+            return f"Không tìm thấy ghi chú nào phù hợp với từ khóa '{keyword}'."
+        results = [f"- [#{n.id}] {n.text} (Thẻ: {n.tags or 'không có'})" for n in notes]
+        return "Các ghi chú tìm được:\n" + "\n".join(results)
+    except Exception as e:
+        return f"❌ Lỗi tìm kiếm ghi chú: {e}"
+
+
 def get_all_agent_tools() -> List[Callable]:
     """Returns the list of callable functions for Gemini Function Calling."""
     return [
@@ -77,4 +102,7 @@ def get_all_agent_tools() -> List[Callable]:
         get_docker_containers,
         restart_docker_container,
         create_scheduled_reminder,
+        save_personal_note,
+        search_personal_notes,
     ]
+

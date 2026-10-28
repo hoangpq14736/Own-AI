@@ -5,6 +5,8 @@ from core.agent_tools import (
     get_docker_containers,
     restart_docker_container,
     create_scheduled_reminder,
+    save_personal_note,
+    search_personal_notes,
     get_all_agent_tools,
     set_agent_context,
 )
@@ -12,9 +14,10 @@ from core.models import VPSMetrics
 
 def test_get_all_agent_tools():
     tools = get_all_agent_tools()
-    assert len(tools) == 4
+    assert len(tools) == 6
     for t in tools:
         assert callable(t)
+
 
 def test_get_vps_status():
     mock_metrics = VPSMetrics(
@@ -58,3 +61,23 @@ def test_create_scheduled_reminder_with_context():
     assert "thành công (#42)" in res
     assert "Họp dự án" in res
     mock_memory.add_reminder.assert_called_once()
+
+
+def test_save_and_search_personal_notes():
+    mock_memory = MagicMock()
+    mock_memory.add_note.return_value = 99
+    mock_note = MagicMock()
+    mock_note.id = 99
+    mock_note.text = "Secret token"
+    mock_note.tags = "#secret"
+    mock_memory.search_notes.return_value = [mock_note]
+
+    set_agent_context(memory_engine=mock_memory, user_id="12345")
+    save_res = save_personal_note(content="Secret token", tags="#secret")
+    assert "Đã lưu ghi chú #99" in save_res
+    mock_memory.add_note.assert_called_once_with(user_id="12345", text="Secret token", tags="#secret")
+
+    search_res = search_personal_notes(keyword="token")
+    assert "Secret token" in search_res
+    mock_memory.search_notes.assert_called_once_with(user_id="12345", query="token", top_k=5)
+

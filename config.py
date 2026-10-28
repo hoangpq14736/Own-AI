@@ -44,6 +44,10 @@ class Settings(BaseModel):
     mltb_target_chat: Optional[Union[int, str]] = Field(default=None)
     disable_safety_filters: bool = Field(default=True)
     enable_search_grounding: bool = Field(default=True)
+    webhook_host: str = Field(default="0.0.0.0")
+    webhook_port: int = Field(default=0)
+    webhook_secret: str = Field(default="")
+
 
     model_config = {
         "frozen": True,
@@ -130,6 +134,10 @@ def load_settings_from_env() -> Settings:
 
     disable_safety = os.getenv("DISABLE_SAFETY_FILTERS", "true").lower() in ("true", "1", "yes")
     enable_search = os.getenv("ENABLE_SEARCH_GROUNDING", "true").lower() in ("true", "1", "yes")
+    webhook_host = os.getenv("WEBHOOK_HOST", "0.0.0.0").strip() or "0.0.0.0"
+    raw_webhook_port = os.getenv("WEBHOOK_PORT", "0").strip()
+    webhook_port = int(raw_webhook_port) if raw_webhook_port.isdigit() else 0
+    webhook_secret = os.getenv("WEBHOOK_SECRET", "").strip()
 
     return Settings(
         gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
@@ -154,7 +162,11 @@ def load_settings_from_env() -> Settings:
         mltb_target_chat=mltb_target,
         disable_safety_filters=disable_safety,
         enable_search_grounding=enable_search,
+        webhook_host=webhook_host,
+        webhook_port=webhook_port,
+        webhook_secret=webhook_secret,
     )
+
 
 
 # Active singleton settings instance
@@ -179,5 +191,9 @@ TELEGRAM_USER_SESSION = settings.telegram_user_session
 MLTB_TARGET_CHAT = settings.mltb_target_chat
 DISABLE_SAFETY_FILTERS = settings.disable_safety_filters
 ENABLE_SEARCH_GROUNDING = settings.enable_search_grounding
+WEBHOOK_HOST = settings.webhook_host
+WEBHOOK_PORT = settings.webhook_port
+WEBHOOK_SECRET = settings.webhook_secret
+
 
 
