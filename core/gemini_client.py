@@ -85,8 +85,9 @@ class GeminiClient:
         contents: list,
         system_instruction: Optional[str] = None,
         enable_search: bool = False,
+        tools: Optional[list] = None,
     ) -> str:
-        """Synchronous wrapper for generate_content with optional Google Search grounding."""
+        """Synchronous wrapper for generate_content with optional Google Search grounding or function tools."""
         if not self.client:
             raise GeminiAPIError("GenAI client is not initialized.")
 
@@ -97,7 +98,9 @@ class GeminiClient:
         if self.disable_safety_filters:
             config.safety_settings = self._get_safety_settings()
 
-        if enable_search:
+        if tools:
+            config.tools = tools
+        elif enable_search:
             config.tools = [{"google_search": {}}]
 
         response = self.client.models.generate_content(
@@ -171,6 +174,7 @@ class GeminiClient:
         chat_history: Optional[List[Union[ChatMessage, dict]]] = None,
         model_override: Optional[str] = None,
         enable_search: bool = False,
+        tools: Optional[list] = None,
     ) -> str:
         """
         Ultra-fast async multimodal generation with inline byte transmission
@@ -235,6 +239,7 @@ class GeminiClient:
                         contents,
                         system_instruction,
                         enable_search,
+                        tools,
                     )
                     # If prompt was blocked and chat history was included, auto-retry without history
                     if result.startswith("⚠️ PROMPT_BLOCKED:") and history_context:
@@ -246,6 +251,7 @@ class GeminiClient:
                             clean_contents,
                             system_instruction,
                             enable_search,
+                            tools,
                         )
                         if retry_res and not retry_res.startswith("⚠️ PROMPT_BLOCKED:") and not retry_res.startswith("Received empty response"):
                             return retry_res
@@ -293,3 +299,6 @@ class GeminiClient:
                     await asyncio.to_thread(self.client.files.delete, name=uploaded_file.name)
                 except Exception as e:
                     logger.warning(f"Failed to delete temp file {uploaded_file.name}: {e}")
+
+    # Backwards compatibility alias
+    generate_text = generate_multimodal

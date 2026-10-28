@@ -113,28 +113,75 @@ def _get_docker():
         logger.debug(f"Docker connection unavailable: {e}")
         return None
 
-def list_docker_containers(client=None) -> str:
+def get_docker_containers_summary(client=None) -> tuple[str, list[dict]]:
     """
-    Lists all active Docker containers on the host.
-    Allows injecting a client for unit testing.
+    Lists active Docker containers on the host.
+    Returns (formatted_text, container_list)
+    where container_list is [{'name': c.name, 'status': c.status, 'image': tag}]
     """
     docker_client = client or _get_docker()
     if not docker_client:
-        return "⚠️ Docker is not connected or accessible from this environment."
+        return "⚠️ Docker is not connected or accessible from this environment.", []
 
     try:
         containers = docker_client.containers.list(all=True)
         if not containers:
-            return "📦 No Docker containers found."
+            return "📦 No Docker containers found.", []
 
+        container_data = []
         text = "🐳 **Active Docker Containers:**\n\n"
         for c in containers:
             status_icon = "🟢" if c.status == "running" else "🔴"
             tag = c.image.tags[0] if getattr(c.image, "tags", None) else getattr(c.image, "short_id", "unknown")
             text += f"{status_icon} **{c.name}**\n   Status: `{c.status}` | Image: `{tag}`\n"
-        return text
+            container_data.append({
+                "name": c.name,
+                "status": c.status,
+                "image": tag,
+            })
+        return text, container_data
     except Exception as e:
-        return f"❌ Error querying Docker: {str(e)}"
+        return f"❌ Error querying Docker: {str(e)}", []
+
+def list_docker_containers(client=None) -> str:
+    """
+    Lists all active Docker containers on the host.
+    Maintains full backwards compatibility with string-only consumers.
+    """
+    text, _ = get_docker_containers_summary(client=client)
+    return text
+
+def clean_vps_cache() -> str:
+    """
+    Attempts to free pagecache, dentries, and inodes on Linux host.
+    Safe fallbacks with diagnostic messages.
+    """
+    import subprocess
+    if psutil.WINDOWS:
+        return "ℹ️ Dọn cache RAM chỉ khả dụng trên Linux VPS."
+    try:
+        subprocess.run(["sync"], timeout=5, check=False)
+        with open("/proc/sys/vm/drop_caches", "w") as f:
+            f.write("3\n")
+        return "🧹 Đã gửi tín hiệu giải phóng pagecache & dentries thành công!"
+    except PermissionError:
+        return "⚠️ Không đủ quyền ghi `/proc/sys/vm/drop_caches` (cần quyền root trên host)."
+    except Exception as e:
+        return f"⚠️ Không thể dọn cache: {str(e)}"
+
+def get_docker_events_generator(client=None):
+    """
+    Returns a generator for Docker events (die, oom) or None if unavailable.
+    Allows injecting client for testing.
+    """
+    docker_client = client or _get_docker()
+    if not docker_client:
+        return None
+    try:
+        return docker_client.events(decode=True, filters={"type": "container", "event": ["die", "oom"]})
+    except Exception as e:
+        logger.debug(f"Docker events stream unavailable: {e}")
+        return None
 
 def get_mltb_logs(
     container_name: str = "mirrorbot-app-1",

@@ -3,6 +3,8 @@ from unittest.mock import MagicMock
 from core.vps_manager import (
     get_vps_health,
     list_docker_containers,
+    get_docker_containers_summary,
+    clean_vps_cache,
     get_mltb_logs,
     restart_mltb_container,
     validate_container_name,
@@ -55,6 +57,26 @@ def test_list_docker_containers_with_mock():
     assert "portainer" in result
     assert "🟢" in result
     assert "🔴" in result
+
+def test_get_docker_containers_summary():
+    mock_c1 = MagicMock()
+    mock_c1.name = "mirrorbot-app-1"
+    mock_c1.status = "running"
+    mock_c1.image.tags = ["mirrorbot:latest"]
+
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = [mock_c1]
+
+    text, containers = get_docker_containers_summary(client=mock_client)
+    assert "mirrorbot-app-1" in text
+    assert len(containers) == 1
+    assert containers[0]["name"] == "mirrorbot-app-1"
+    assert containers[0]["status"] == "running"
+
+def test_clean_vps_cache():
+    result = clean_vps_cache()
+    assert isinstance(result, str)
+    assert len(result) > 0
 
 def test_list_docker_containers_empty():
     mock_client = MagicMock()

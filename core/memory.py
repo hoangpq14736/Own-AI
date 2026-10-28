@@ -5,7 +5,7 @@ from typing import List, Dict, Optional, Any
 from contextlib import contextmanager
 import logging
 
-from core.models import LearnedRule, UserFact, ChatMessage
+from core.models import LearnedRule, UserFact, ChatMessage, Reminder
 from core.exceptions import ValidationError
 
 logger = logging.getLogger(__name__)
@@ -97,6 +97,17 @@ class MemoryEngine:
                     content TEXT NOT NULL,
                     media_type TEXT,
                     created_at TEXT NOT NULL
+                )
+            """)
+            # Scheduled reminders
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS reminders (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    task TEXT NOT NULL,
+                    remind_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    is_completed INTEGER NOT NULL DEFAULT 0
                 )
             """)
             conn.commit()
@@ -342,3 +353,96 @@ class MemoryEngine:
             sections.append("[END PERSISTENT MEMORY]\n")
 
         return "\n".join(sections)
+
+    # --- Reminders Management ---
+
+    def add_reminder(
+        self,
+        user_id: str,
+        task: str,
+        remind_at: str
+    ) -> int:
+        """Saves a new scheduled reminder."""
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id cannot be empty.")
+        if not task or not task.strip():
+            raise ValidationError("task cannot be empty.")
+        if not remind_at or not remind_at.strip():
+            raise ValidationError("remind_at cannot be empty.")
+
+        now_iso = self._now_iso()
+        with self._connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO reminders (user_id, task, remind_at, created_at, is_completed)
+                VALUES (?, ?, ?, ?, 0)
+            """, (user_id.strip(), task.strip(), remind_at.strip(), now_iso))
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_due_reminders(self) -> List[Reminder]:
+        """Fetches all active reminders whose scheduled time is now or in the past."""
+        now_iso = self._now_iso()
+        with self._connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, user_id, task, remind_at, created_at, is_completed
+                FROM reminders
+                WHERE is_completed = 0 AND remind_at <= ?
+                ORDER BY remind_at ASC
+            """, (now_iso,))
+            rows = cursor.fetchall()
+            return [
+                Reminder(
+                    id=row["id"],
+                    user_id=row["user_id"],
+                    task=row["task"],
+                    remind_at=row["remind_at"],
+                    created_at=row["created_at"],
+                    is_completed=bool(row["is_completed"])
+                )
+                for row in rows
+            ]
+
+    def mark_reminder_completed(self, reminder_id: int) -> bool:
+        """Marks a reminder as completed."""
+        with self._connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE reminders SET is_completed = 1 WHERE id = ?
+            """, (reminder_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def list_active_reminders(self, user_id: str) -> List[Reminder]:
+        """Lists pending/active reminders for a specific user."""
+        with self._connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, user_id, task, remind_at, created_at, is_completed
+                FROM reminders
+                WHERE user_id = ? AND is_completed = 0
+                ORDER BY remind_at ASC
+            """, (user_id,))
+            rows = cursor.fetchall()
+            return [
+                Reminder(
+                    id=row["id"],
+                    user_id=row["user_id"],
+                    task=row["task"],
+                    remind_at=row["remind_at"],
+                    created_at=row["created_at"],
+                    is_completed=bool(row["is_completed"])
+                )
+                for row in rows
+            ]
+
+    def delete_reminder(self, reminder_id: int, user_id: str) -> bool:
+        """Deletes or cancels a reminder for a specific user."""
+        with self._connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                DELETE FROM reminders WHERE id = ? AND user_id = ?
+            """, (reminder_id, user_id))
+            conn.commit()
+            return cursor.rowcount > 0

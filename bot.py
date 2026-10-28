@@ -12,12 +12,15 @@ from telegram import (
     BotCommand,
     BotCommandScopeAllPrivateChats,
     BotCommandScopeAllGroupChats,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
 )
 from telegram.error import TimedOut, NetworkError
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
+    CallbackQueryHandler,
     ContextTypes,
     filters,
 )
@@ -30,9 +33,16 @@ from core.media_generator import generate_google_image, generate_google_video, t
 from core.vps_manager import (
     get_vps_health,
     list_docker_containers,
+    get_docker_containers_summary,
+    clean_vps_cache,
     get_mltb_logs,
     restart_mltb_container,
 )
+from core.shell_executor import execute_safe_shell_command
+from core.agent_tools import set_agent_context, get_all_agent_tools
+from core.reminder_parser import parse_reminder_text
+from core.web_reader import fetch_web_page
+from core.speedtest_manager import run_vps_speedtest
 from core.scheduler import SchedulerService, create_daily_health_report, create_memory_backup
 from core.telegram_utils import (
     strip_bot_mention,
@@ -116,8 +126,14 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "**VPS & MLTB Management:**\n"
         "• 📊 `/vps` - Real-time CPU, RAM (24GB), Disk, & Uptime\n"
         "• 🐳 `/docker` - List active containers on your VPS\n"
+        "• ⚡ `/exec <cmd>` - Run safe shell command remotely\n"
+        "• 🚀 `/speedtest` - Test VPS network download, upload & ping\n"
         "• 📋 `/mltb_logs` - Read last 25 lines of MLTB download logs\n"
         "• 🔄 `/mltb_restart` - Restart MLTB if downloads freeze\n\n"
+        "**Smart Assistant & Productivity:**\n"
+        "• ⏰ `/remind <time> <task>` - Set smart scheduled reminders\n"
+        "• 📋 `/reminders` - View active pending reminders\n"
+        "• 📰 `/read <url>` - Read & summarize web articles in Vietnamese\n\n"
         "**Auto-Updates & Maintenance:**\n"
         "• 🔍 `/check_update` - Check for new commits on GitHub\n"
         "• 🚀 `/update` - Pull latest updates & restart bot\n\n"
@@ -210,7 +226,31 @@ async def backup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Failed to transmit backup file: {e}")
         await safe_edit_text(status_msg, f"❌ Failed to send backup document: {e}")
 
-# --- VPS & MLTB Management Commands ---
+# --- VPS & MLTB Management Keyboards & Commands ---
+
+def get_vps_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🔄 Làm mới", callback_data="vps:ref"),
+            InlineKeyboardButton("🧹 Dọn cache RAM", callback_data="vps:clean"),
+        ]
+    ])
+
+def get_docker_keyboard(containers: list[dict] | None = None) -> InlineKeyboardMarkup:
+    keyboard = []
+    if containers:
+        for c in containers[:4]:
+            name = c.get("name", "")
+            status_icon = "🟢" if c.get("status") == "running" else "🔴"
+            short_name = name[:16]
+            keyboard.append([
+                InlineKeyboardButton(f"{status_icon} 🔄 {short_name}", callback_data=f"dk:r:{name}"),
+                InlineKeyboardButton(f"📋 Logs", callback_data=f"dk:l:{name}"),
+            ])
+    keyboard.append([
+        InlineKeyboardButton("🔄 Làm mới danh sách", callback_data="dk:ref")
+    ])
+    return InlineKeyboardMarkup(keyboard)
 
 async def vps_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update.effective_user.id):
@@ -219,7 +259,11 @@ async def vps_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     stats = get_vps_health()
-    await send_safe_response(update.message, stats.text)
+    await update.message.reply_text(
+        stats.text,
+        reply_markup=get_vps_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN
+    )
 
 async def docker_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update.effective_user.id):
@@ -227,8 +271,74 @@ async def docker_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⛔ Unauthorized.")
         return
 
-    text = list_docker_containers()
-    await send_safe_response(update.message, text)
+    text, containers = get_docker_containers_summary()
+    await update.message.reply_text(
+        text,
+        reply_markup=get_docker_keyboard(containers),
+        parse_mode=constants.ParseMode.MARKDOWN
+    )
+
+async def vps_docker_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query:
+        return
+
+    user_id = query.from_user.id
+    if not is_authorized(user_id):
+        await query.answer("⛔ Bạn không có quyền thao tác.", show_alert=True)
+        return
+
+    data = query.data or ""
+    try:
+        if data == "vps:ref":
+            stats = get_vps_health()
+            await query.answer("🔄 Đã cập nhật chỉ số VPS!")
+            await query.edit_message_text(
+                stats.text,
+                reply_markup=get_vps_keyboard(),
+                parse_mode=constants.ParseMode.MARKDOWN
+            )
+
+        elif data == "vps:clean":
+            res = clean_vps_cache()
+            await query.answer(res[:200], show_alert=True)
+            stats = get_vps_health()
+            await query.edit_message_text(
+                f"{stats.text}\n\n_{res}_",
+                reply_markup=get_vps_keyboard(),
+                parse_mode=constants.ParseMode.MARKDOWN
+            )
+
+        elif data == "dk:ref":
+            text, containers = get_docker_containers_summary()
+            await query.answer("🔄 Đã cập nhật danh sách Docker!")
+            await query.edit_message_text(
+                text,
+                reply_markup=get_docker_keyboard(containers),
+                parse_mode=constants.ParseMode.MARKDOWN
+            )
+
+        elif data.startswith("dk:r:"):
+            container_name = data[5:]
+            await query.answer(f"🔄 Đang khởi động lại {container_name}...")
+            res = restart_mltb_container(container_name=container_name)
+            await query.answer(res[:200], show_alert=True)
+            text, containers = get_docker_containers_summary()
+            await query.edit_message_text(
+                f"{text}\n\n{res}",
+                reply_markup=get_docker_keyboard(containers),
+                parse_mode=constants.ParseMode.MARKDOWN
+            )
+
+        elif data.startswith("dk:l:"):
+            container_name = data[5:]
+            await query.answer(f"📋 Đang tải logs {container_name}...")
+            logs_text = get_mltb_logs(container_name=container_name, lines=50)
+            await send_safe_response(query.message, logs_text)
+
+    except Exception as e:
+        if "Message is not modified" not in str(e):
+            logger.warning(f"Error handling callback query '{data}': {e}")
 
 async def mltb_logs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update.effective_user.id):
@@ -252,6 +362,162 @@ async def mltb_restart_command(update: Update, context: ContextTypes.DEFAULT_TYP
     status_msg = await update.message.reply_text("🔄 Sending restart signal to `mirrorbot-app-1`...")
     text = restart_mltb_container(container_name="mirrorbot-app-1")
     await safe_edit_text(status_msg, text)
+
+async def exec_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Executes a safe shell command on the host VPS with guardrails and timeout."""
+    if not is_authorized(update.effective_user.id):
+        if update.effective_chat.type == constants.ChatType.PRIVATE:
+            await update.message.reply_text("⛔ Unauthorized.")
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "💡 **Cách dùng:** `/exec <lệnh shell>`\n*Ví dụ:*\n• `/exec docker ps`\n• `/exec uptime`\n• `/exec df -h`",
+            parse_mode=constants.ParseMode.MARKDOWN
+        )
+        return
+
+    raw_command = " ".join(context.args)
+    status_msg = await update.message.reply_text(
+        f"⚡ Đang thực thi: `{raw_command[:50]}`...",
+        parse_mode=constants.ParseMode.MARKDOWN
+    )
+
+    result = await execute_safe_shell_command(raw_command, timeout=30.0)
+
+    if result.is_truncated and result.full_output:
+        doc_stream = io.BytesIO(result.full_output.encode("utf-8"))
+        doc_stream.name = "exec_output.txt"
+        await safe_edit_text(status_msg, result.formatted_text)
+        await update.message.reply_document(
+            document=doc_stream,
+            caption=f"📄 Toàn bộ output ({len(result.full_output)} ký tự) cho `{raw_command[:30]}`"
+        )
+    else:
+        await safe_edit_text(status_msg, result.formatted_text)
+
+# --- Smart Reminders & Web Reader & Speedtest Commands ---
+
+async def remind_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Schedules a new reminder. E.g. /remind 30m Check download or /remind 18:30 Dinner"""
+    if not is_authorized(update.effective_user.id):
+        if update.effective_chat.type == constants.ChatType.PRIVATE:
+            await update.message.reply_text("⛔ Unauthorized.")
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "💡 **Cách dùng:** `/remind <thời gian> <nội dung>`\n*Ví dụ:*\n"
+            "• `/remind 30m Kiểm tra tải file`\n"
+            "• `/remind 2h Đi họp`\n"
+            "• `/remind 18:30 Nấu cơm`\n"
+            "• `/remind 2026-10-29 09:00 Gặp đối tác`",
+            parse_mode=constants.ParseMode.MARKDOWN
+        )
+        return
+
+    raw_text = " ".join(context.args)
+    try:
+        remind_at, task = parse_reminder_text(raw_text)
+        rem_id = memory.add_reminder(
+            user_id=str(update.effective_user.id),
+            task=task,
+            remind_at=remind_at
+        )
+        await update.message.reply_text(
+            f"✅ **Đã đặt nhắc việc thành công (#{rem_id})!**\n\n"
+            f"📌 **Nhiệm vụ:** {task}\n"
+            f"⏱️ **Thời gian hẹn:** `{remind_at}`",
+            parse_mode=constants.ParseMode.MARKDOWN
+        )
+    except Exception as e:
+        await update.message.reply_text(f"❌ {str(e)}")
+
+async def list_reminders_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Lists all active reminders for the user."""
+    if not is_authorized(update.effective_user.id):
+        if update.effective_chat.type == constants.ChatType.PRIVATE:
+            await update.message.reply_text("⛔ Unauthorized.")
+        return
+
+    user_id = str(update.effective_user.id)
+    reminders = memory.list_active_reminders(user_id)
+    if not reminders:
+        await update.message.reply_text("📅 Bạn không có lịch nhắc việc nào đang chờ.")
+        return
+
+    lines = ["📋 **Danh Sách Nhắc Việc Đang Chờ:**\n"]
+    for r in reminders:
+        lines.append(f"• `#{r.id}`: **{r.task}** (Hẹn lúc: `{r.remind_at}`)")
+    lines.append("\n_Xóa nhắc việc bằng lệnh:_ `/del_reminder <id>`")
+    await update.message.reply_text("\n".join(lines), parse_mode=constants.ParseMode.MARKDOWN)
+
+async def delete_reminder_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Deletes an active reminder by ID."""
+    if not is_authorized(update.effective_user.id):
+        if update.effective_chat.type == constants.ChatType.PRIVATE:
+            await update.message.reply_text("⛔ Unauthorized.")
+        return
+
+    if not context.args or not context.args[0].isdigit():
+        await update.message.reply_text("💡 Cách dùng: `/del_reminder <id>` (Ví dụ: `/del_reminder 1`)")
+        return
+
+    rem_id = int(context.args[0])
+    success = memory.delete_reminder(rem_id, user_id=str(update.effective_user.id))
+    if success:
+        await update.message.reply_text(f"✅ Đã hủy nhắc việc `#{rem_id}` thành công.")
+    else:
+        await update.message.reply_text(f"❌ Không tìm thấy nhắc việc `#{rem_id}` hoặc bạn không có quyền xóa.")
+
+async def read_url_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Fetches clean text from a URL and generates an executive summary with Gemini."""
+    if not is_authorized(update.effective_user.id):
+        if update.effective_chat.type == constants.ChatType.PRIVATE:
+            await update.message.reply_text("⛔ Unauthorized.")
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "💡 **Cách dùng:** `/read <url>`\n*Ví dụ:* `/read https://vnexpress.net/...`",
+            parse_mode=constants.ParseMode.MARKDOWN
+        )
+        return
+
+    url = context.args[0].strip()
+    status_msg = await update.message.reply_text(f"🌐 Đang tải và trích xuất nội dung từ:\n`{url}`...", parse_mode=constants.ParseMode.MARKDOWN)
+
+    page = await fetch_web_page(url)
+    if page.error:
+        await safe_edit_text(status_msg, f"❌ {page.error}")
+        return
+
+    await safe_edit_text(status_msg, f"🧠 Đang phân tích bài viết: **{page.title}** ({page.length} ký tự)...")
+
+    prompt = (
+        f"Hãy đọc bài viết sau và tóm tắt thành 3-5 luận điểm cốt lõi bằng tiếng Việt:\n\n"
+        f"Tiêu đề: {page.title}\n"
+        f"Nguồn: {page.url}\n\n"
+        f"Nội dung:\n{page.text}\n\n"
+        f"Yêu cầu:\n"
+        f"- Nêu bật các thông điệp chính hoặc kiến thức kỹ thuật quan trọng.\n"
+        f"- Văn phong rõ ràng, gãy gọn, có cấu trúc gạch đầu dòng.\n"
+        f"- Cuối bài nêu 1 câu tổng kết 'Takeaway'."
+    )
+
+    summary = await gemini.generate_multimodal(prompt=prompt)
+    await safe_edit_text(status_msg, f"📰 **Tóm tắt bài viết: [{page.title}]({page.url})**\n\n{summary}")
+
+async def speedtest_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Runs a live network speedtest on the host VPS."""
+    if not is_authorized(update.effective_user.id):
+        if update.effective_chat.type == constants.ChatType.PRIVATE:
+            await update.message.reply_text("⛔ Unauthorized.")
+        return
+
+    status_msg = await update.message.reply_text("🚀 Đang khởi động đo tốc độ mạng VPS (Download / Upload / Ping)... Mất khoảng 15-20 giây.")
+    result = await run_vps_speedtest()
+    await safe_edit_text(status_msg, result.text)
 
 # --- Repository Update & Maintenance Commands ---
 
@@ -701,12 +967,15 @@ async def handle_multimodal_message(
         logger.info(f"Google Search Grounding activated for: {clean_prompt[:60]}")
 
     effective_prompt = clean_prompt if clean_prompt else "Please analyze this file."
+    set_agent_context(memory_engine=memory, user_id=user_id)
+    tools_to_use = None if use_search else get_all_agent_tools()
     response = await gemini.generate_multimodal(
         prompt=effective_prompt,
         media_path=media_path,
         system_instruction=system_rules,
         chat_history=recent_history,
         enable_search=use_search,
+        tools=tools_to_use,
     )
 
     # 6. Save to chat history
@@ -907,6 +1176,14 @@ def main():
     app.add_handler(CommandHandler("docker", docker_command))
     app.add_handler(CommandHandler("mltb_logs", mltb_logs_command))
     app.add_handler(CommandHandler("mltb_restart", mltb_restart_command))
+    app.add_handler(CommandHandler("exec", exec_command))
+    app.add_handler(CommandHandler("sh", exec_command))
+    app.add_handler(CommandHandler("speedtest", speedtest_command))
+    app.add_handler(CommandHandler("remind", remind_command))
+    app.add_handler(CommandHandler("reminders", list_reminders_command))
+    app.add_handler(CommandHandler("del_reminder", delete_reminder_command))
+    app.add_handler(CommandHandler("read", read_url_command))
+    app.add_handler(CallbackQueryHandler(vps_docker_callback_handler, pattern="^(vps:|dk:)"))
 
     # Maintenance & Update commands
     app.add_handler(CommandHandler("check_update", check_update_command))

@@ -236,3 +236,46 @@ async def test_scheduler_loop_fires_report(sample_db):
     # Should have triggered send_report and send_backup
     assert mock_bot.send_message.called
     assert mock_bot.send_document.called
+
+@pytest.mark.anyio
+async def test_scheduler_docker_crash_event(sample_db):
+    mock_bot = AsyncMock()
+    settings = Settings(
+        db_path=sample_db,
+        allowed_user_ids=(12345,),
+    )
+    mock_memory = MagicMock()
+
+    service = SchedulerService(
+        bot=mock_bot,
+        settings=settings,
+        memory_engine=mock_memory,
+        sleep_interval=0.1
+    )
+    service._running = True
+
+    mock_event = {
+        "Action": "die",
+        "Actor": {
+            "Attributes": {
+                "name": "mirrorbot-app-1",
+                "exitCode": "137"
+            }
+        }
+    }
+
+    def fake_events_gen():
+        yield mock_event
+
+    with patch("core.scheduler.get_docker_events_generator", return_value=fake_events_gen()):
+        task = asyncio.create_task(service._listen_docker_events(12345))
+        await asyncio.sleep(0.1)
+        service._running = False
+        await asyncio.sleep(0.05)
+        task.cancel()
+
+    assert mock_bot.send_message.called
+    call_args = mock_bot.send_message.call_args[1]
+    assert "DOCKER CONTAINER CRASH ALERT" in call_args["text"]
+    assert "mirrorbot-app-1" in call_args["text"]
+    assert "137" in call_args["text"]

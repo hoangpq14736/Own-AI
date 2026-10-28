@@ -13,8 +13,18 @@ import logging
 
 import config
 from core.models import BackupResult, ScheduledReport, VPSMetrics
-from core.vps_manager import get_vps_health, list_docker_containers
+from core.vps_manager import (
+    get_vps_health,
+    list_docker_containers,
+    get_docker_events_generator,
+)
 from core.memory import MemoryEngine
+
+try:
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    TELEGRAM_UI_AVAILABLE = True
+except ImportError:
+    TELEGRAM_UI_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -159,8 +169,10 @@ class SchedulerService:
         self.sleep_interval = sleep_interval
         self._running = False
         self._task: Optional[asyncio.Task] = None
+        self._events_task: Optional[asyncio.Task] = None
         self._last_report_date: Optional[str] = None
         self._last_alert_time: Optional[datetime] = None
+        self._container_alert_throttle: dict[str, datetime] = {}
 
     async def send_report(self, chat_id: int) -> bool:
         """Generates and delivers the daily executive briefing to a chat."""
@@ -232,6 +244,31 @@ class SchedulerService:
         except Exception as e:
             logger.debug(f"Watchdog check failed: {e}")
 
+    async def _check_reminders(self):
+        """Checks for due reminders and delivers notifications to users."""
+        try:
+            due_reminders = self.memory.get_due_reminders()
+            for r in due_reminders:
+                try:
+                    chat_id = int(r.user_id)
+                    alert_msg = (
+                        f"⏰ **NHẮC VIỆC HẸN GIỜ:**\n\n"
+                        f"📌 **Nhiệm vụ:** {r.task}\n"
+                        f"⏱️ **Thời gian đặt:** `{r.remind_at}`\n\n"
+                        f"_Chúc bạn hoàn thành tốt công việc!_"
+                    )
+                    await self.bot.send_message(
+                        chat_id=chat_id,
+                        text=alert_msg,
+                        parse_mode="Markdown"
+                    )
+                    self.memory.mark_reminder_completed(r.id)
+                    logger.info(f"Delivered reminder #{r.id} to user {chat_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to deliver reminder #{r.id}: {e}")
+        except Exception as e:
+            logger.debug(f"Error checking due reminders: {e}")
+
     async def _loop(self):
         """Main background scheduling loop."""
         logger.info("Scheduler service loop started.")
@@ -256,16 +293,88 @@ class SchedulerService:
                     # 2. Watchdog Check
                     await self._check_watchdog(chat_id)
 
+                    # 3. Scheduled Reminders Check
+                    await self._check_reminders()
+
             except Exception as e:
                 logger.error(f"Scheduler loop error: {e}", exc_info=True)
 
             await asyncio.sleep(self.sleep_interval)
+
+    async def _listen_docker_events(self, chat_id: int):
+        """Streams Docker container die/oom events and alerts Telegram in real-time."""
+        events_gen = get_docker_events_generator()
+        if not events_gen:
+            return
+
+        def _get_next_event():
+            try:
+                return next(events_gen)
+            except Exception:
+                return None
+
+        while self._running:
+            event = await asyncio.to_thread(_get_next_event)
+            if not event or not self._running:
+                await asyncio.sleep(2)
+                continue
+
+            try:
+                actor = event.get("Actor", {})
+                attrs = actor.get("Attributes", {})
+                container_name = attrs.get("name") or "unknown"
+                exit_code = attrs.get("exitCode", "unknown")
+                action = event.get("Action", "die")
+
+                # If container exited abnormally or OOM killed
+                if exit_code != "0" or action == "oom":
+                    now = datetime.now()
+                    last_time = self._container_alert_throttle.get(container_name)
+                    # Throttle duplicate alerts per container to 5 minutes
+                    if last_time and (now - last_time) < timedelta(minutes=5):
+                        continue
+
+                    self._container_alert_throttle[container_name] = now
+                    alert_text = (
+                        f"🚨 **DOCKER CONTAINER CRASH ALERT!**\n\n"
+                        f"• 📦 **Container:** `{container_name}`\n"
+                        f"• ⚠️ **Action:** `{action}` | **Exit Code:** `{exit_code}`\n"
+                        f"• ⏱️ **Thời gian:** `{now.strftime('%H:%M:%S %d/%m/%Y')}`\n\n"
+                        f"Container đã bị dừng bất thường. Bấm nút bên dưới để khởi động lại ngay."
+                    )
+
+                    keyboard = None
+                    if TELEGRAM_UI_AVAILABLE:
+                        keyboard = InlineKeyboardMarkup([
+                            [
+                                InlineKeyboardButton(
+                                    f"🔄 Restart {container_name[:16]}",
+                                    callback_data=f"dk:r:{container_name}"
+                                ),
+                                InlineKeyboardButton(
+                                    "📋 Logs",
+                                    callback_data=f"dk:l:{container_name}"
+                                ),
+                            ]
+                        ])
+
+                    await self.bot.send_message(
+                        chat_id=chat_id,
+                        text=alert_text,
+                        reply_markup=keyboard,
+                        parse_mode="Markdown"
+                    )
+            except Exception as e:
+                logger.debug(f"Error handling docker event: {e}")
 
     def start(self) -> asyncio.Task:
         """Starts the scheduler in the current asyncio event loop."""
         if not self._running:
             self._running = True
             self._task = asyncio.create_task(self._loop())
+            chat_id = self.settings.get_admin_chat_id()
+            if chat_id:
+                self._events_task = asyncio.create_task(self._listen_docker_events(chat_id))
         return self._task
 
     def stop(self):
@@ -273,3 +382,5 @@ class SchedulerService:
         self._running = False
         if self._task and not self._task.done():
             self._task.cancel()
+        if self._events_task and not self._events_task.done():
+            self._events_task.cancel()

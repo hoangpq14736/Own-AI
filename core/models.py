@@ -287,3 +287,38 @@ class UpdateInfo:
             "commits_behind": list(self.commits_behind),
             "error": self.error,
         }
+
+
+@dataclass(frozen=True)
+class Reminder:
+    """Immutable representation of a scheduled reminder."""
+    id: int
+    user_id: str
+    task: str
+    remind_at: str
+    created_at: str = ""
+    is_completed: bool = False
+
+    def __getitem__(self, key: Any) -> Any:
+        if not isinstance(key, str):
+            raise TypeError(f"Key must be string, not {type(key).__name__}")
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            raise KeyError(key)
+
+    def __contains__(self, key: Any) -> bool:
+        return isinstance(key, str) and hasattr(self, key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key, default)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "task": self.task,
+            "remind_at": self.remind_at,
+            "created_at": self.created_at,
+            "is_completed": self.is_completed,
+        }
