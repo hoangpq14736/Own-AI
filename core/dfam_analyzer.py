@@ -15,10 +15,11 @@ from core.models import DFAMReport
 
 logger = logging.getLogger(__name__)
 
-# Default build volume for Anycubic Kobra (standard: 220x220x250 mm)
-DEFAULT_BED_X = 220.0
-DEFAULT_BED_Y = 220.0
-DEFAULT_BED_Z = 250.0
+# Default build volume for Anycubic Kobra X (260x260x260 mm)
+DEFAULT_BED_X = 260.0
+DEFAULT_BED_Y = 260.0
+DEFAULT_BED_Z = 260.0
+
 PLA_DENSITY_G_CM3 = 1.24
 DEFAULT_INFILL_RATIO = 0.20
 
@@ -205,11 +206,11 @@ def analyze_stl_file(
         needs_support = overhang_ratio > 3.0
 
         # Construct Report Text
-        bed_status = "✅ Vừa vặn bàn in" if fits_bed else f"⚠️ Vượt quá bàn in Anycubic Kobra ({bed_x}x{bed_y}x{bed_z} mm)"
+        bed_status = "✅ Vừa vặn bàn in" if fits_bed else f"⚠️ Vượt quá bàn in Anycubic Kobra X ({bed_x}x{bed_y}x{bed_z} mm)"
         support_status = f"⚠️ Cần bật Support (~{overhang_ratio}% diện tích có góc dốc > 45°)" if needs_support else "✅ Không cần Support (Góc dốc an toàn < 45°)"
 
         report_lines = [
-            f"🖨️ **Báo Cáo Khả Dụng In 3D (DfAM) - Anycubic Kobra**",
+            f"🖨️ **Báo Cáo Khả Dụng In 3D (DfAM) - Anycubic Kobra X**",
             f"📦 **Tệp:** `{file_name}`",
             "",
             f"📐 **Kích thước mô hình:** `{size_x} × {size_y} × {size_z} mm`",
@@ -217,10 +218,11 @@ def analyze_stl_file(
             f"🧊 **Thể tích ước tính:** `{volume_cm3} cm³`",
             f"⚖️ **Trọng lượng PLA (20% infill):** `~{weight_g} g`",
             "",
-            f"🎯 **Đánh giá DfAM & Bàn in:**",
-            f"• **Bàn in Anycubic Kobra:** {bed_status}",
+            f"🎯 **Đánh giá DfAM & Bàn in Kobra X (260×260×260 mm):**",
+            f"• **Bàn in Anycubic Kobra X:** {bed_status}",
             f"• **Góc dốc Overhang (> 45°):** {support_status}",
         ]
+
 
         if needs_support:
             report_lines.append("\n💡 **Khuyến nghị:** Nên dùng **Tree Support (Organic)** trong OrcaSlicer/Cura để dễ bóc và tiết kiệm nhựa.")

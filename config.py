@@ -50,9 +50,10 @@ class Settings(BaseModel):
     printer_url: str = Field(default="")
     printer_api_type: str = Field(default="moonraker")
     printer_api_key: str = Field(default="")
-    kobra_bed_x: float = Field(default=220.0)
-    kobra_bed_y: float = Field(default=220.0)
-    kobra_bed_z: float = Field(default=250.0)
+    kobra_bed_x: float = Field(default=260.0)
+    kobra_bed_y: float = Field(default=260.0)
+    kobra_bed_z: float = Field(default=260.0)
+
 
 
 
@@ -148,9 +149,10 @@ def load_settings_from_env() -> Settings:
     printer_url = os.getenv("PRINTER_URL", "").strip()
     printer_api_type = os.getenv("PRINTER_API_TYPE", "moonraker").strip()
     printer_api_key = os.getenv("PRINTER_API_KEY", "").strip()
-    kobra_bed_x = float(os.getenv("KOBRA_BED_X", "220.0").strip() or 220.0)
-    kobra_bed_y = float(os.getenv("KOBRA_BED_Y", "220.0").strip() or 220.0)
-    kobra_bed_z = float(os.getenv("KOBRA_BED_Z", "250.0").strip() or 250.0)
+    kobra_bed_x = float(os.getenv("KOBRA_BED_X", "260.0").strip() or 260.0)
+    kobra_bed_y = float(os.getenv("KOBRA_BED_Y", "260.0").strip() or 260.0)
+    kobra_bed_z = float(os.getenv("KOBRA_BED_Z", "260.0").strip() or 260.0)
+
 
     return Settings(
         gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),

@@ -669,11 +669,11 @@ async def dfam_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     bed_info = f"{config.settings.kobra_bed_x}x{config.settings.kobra_bed_y}x{config.settings.kobra_bed_z} mm"
     help_text = (
-        f"🖨️ **Kiểm Tra Khả Dụng In 3D (DfAM) - Anycubic Kobra**\n\n"
-        f"• **Bàn in hiện tại:** `{bed_info}`\n"
-        f"• **Cách dùng:** Gửi trực tiếp file `.stl` hoặc `.3mf` vào bot (hoặc reply file kèm lệnh `/dfam`).\n\n"
+        f"🖨️ **Kiểm Tra Khả Dụng In 3D (DfAM) - Anycubic Kobra X**\n\n"
+        f"• **Bàn in Anycubic Kobra X:** `{bed_info}`\n"
+        f"• **Cách dùng:** Gửi trực tiếp file `.stl`, `.3mf` hoặc `.obj` vào bot (hoặc reply file kèm lệnh `/dfam`).\n\n"
         f"🔍 **Bot sẽ tự động tính toán:**\n"
-        f"1. Kích thước (X, Y, Z) xem có vừa bàn in Kobra không.\n"
+        f"1. Kích thước (X, Y, Z) xem có vừa bàn in Kobra X (260×260×260 mm) không.\n"
         f"2. Bóc tách góc nghiêng Overhang (> 45°), cảnh báo phần cần bật Support.\n"
         f"3. Ước tính thể tích (cm³) và trọng lượng cuộn nhựa PLA (g)."
     )
@@ -702,7 +702,8 @@ async def gcode_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     help_text = (
         "📄 **Kiểm Tra Thông Số File G-Code**\n\n"
-        "• **Cách dùng:** Gửi trực tiếp file `.gcode` đã cắt lát (từ OrcaSlicer, Anycubic Slicer, Cura...) vào bot.\n\n"
+        "• **Tương thích:** Anycubic Slicer Next, OrcaSlicer, PrusaSlicer, Cura...\n"
+        "• **Cách dùng:** Gửi trực tiếp file `.gcode` đã cắt lát vào bot.\n\n"
         "🔍 **Bot sẽ tự động đọc:**\n"
         "1. Thời gian in ước tính thực tế.\n"
         "2. Chiều cao lớp in (Layer Height) và tổng số Layer.\n"
@@ -712,7 +713,7 @@ async def gcode_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(help_text, parse_mode=constants.ParseMode.MARKDOWN)
 
 async def kobra_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Checks live status of Anycubic Kobra 3D printer."""
+    """Checks live status of Anycubic Kobra X 3D printer."""
     if not is_authorized(update.effective_user.id):
         if update.effective_chat.type == constants.ChatType.PRIVATE:
             await update.message.reply_text("⛔ Unauthorized.")
@@ -725,6 +726,7 @@ async def kobra_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     status = await client.get_status()
     await update.message.reply_text(status.text, parse_mode=constants.ParseMode.MARKDOWN)
+
 
 async def check_update_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Checks for new commits on the configured GitHub repository branch."""
@@ -1311,9 +1313,10 @@ BOT_COMMANDS = [
     BotCommand("draw", "Generate image with Google Gemini"),
     BotCommand("video", "Generate cinematic video with Google Veo 3.1"),
     BotCommand("speak", "Speak text in bilingual neural voice"),
-    BotCommand("dfam", "Check 3D model printability for Anycubic Kobra"),
+    BotCommand("dfam", "Check 3D model printability for Anycubic Kobra X"),
     BotCommand("gcode", "Inspect sliced G-code print parameters"),
-    BotCommand("kobra", "Live status of Anycubic Kobra 3D printer"),
+    BotCommand("kobra", "Live status of Anycubic Kobra X 3D printer"),
+
     BotCommand("rules", "View active learned rules and preferences"),
     BotCommand("delete_rule", "Remove a learned rule by ID"),
     BotCommand("clear_rules", "Clear all learned rules"),
