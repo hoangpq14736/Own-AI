@@ -39,7 +39,8 @@ from core.vps_manager import (
     restart_mltb_container,
 )
 from core.shell_executor import execute_safe_shell_command
-from core.agent_tools import set_agent_context, get_all_agent_tools
+from core.agent_tools import set_agent_context, get_all_agent_tools, get_tools_for_route
+from core.reflex_router import route_prompt
 from core.reminder_parser import parse_reminder_text
 from core.web_reader import fetch_web_page
 from core.speedtest_manager import run_vps_speedtest
@@ -1083,6 +1084,7 @@ async def handle_multimodal_message(
 
     # Clean mention handle from user's prompt so Gemini receives clean text
     clean_prompt = strip_bot_mention(prompt_text, bot_username)
+    route = route_prompt(clean_prompt)
 
     # 2b. Direct MLTB Leech / Mirror Command Dispatch
     has_reply_media = bool(
@@ -1096,16 +1098,18 @@ async def handle_multimodal_message(
         )
     )
 
-    # Lấy các quy tắc và sở thích đã học từ SQLite memory
-    system_rules = memory.build_memory_system_prompt(user_id)
+    direct_mltb, mltb_explanation = (None, None)
+    if route.include_mltb or has_reply_media:
+        # Lấy các quy tắc và sở thích đã học từ SQLite memory
+        system_rules = memory.build_memory_system_prompt(user_id, query_text=clean_prompt, include_mltb=True)
 
-    # Gọi bộ não AI dịch ngôn ngữ tự nhiên sang lệnh MLTB
-    direct_mltb, mltb_explanation = await translate_natural_language_to_mltb(
-        gemini_client=gemini,
-        user_prompt=clean_prompt,
-        system_rules=system_rules,
-        has_reply_media=has_reply_media,
-    )
+        # Gọi bộ não AI dịch ngôn ngữ tự nhiên sang lệnh MLTB
+        direct_mltb, mltb_explanation = await translate_natural_language_to_mltb(
+            gemini_client=gemini,
+            user_prompt=clean_prompt,
+            system_rules=system_rules,
+            has_reply_media=has_reply_media,
+        )
 
     if direct_mltb:
         logger.info(f"MLTB command synthesized via Brain: {direct_mltb} ({mltb_explanation})")
@@ -1154,8 +1158,12 @@ async def handle_multimodal_message(
     # Typing indicator
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=constants.ChatAction.TYPING)
 
-    # 3. Fetch learned rules & history
-    system_rules = memory.build_memory_system_prompt(user_id)
+    # 3. Fetch learned rules & history (L2 Hybrid Retrieval + L1 MLTB gating)
+    system_rules = memory.build_memory_system_prompt(
+        user_id,
+        query_text=clean_prompt,
+        include_mltb=route.include_mltb,
+    )
     recent_history = memory.get_recent_history(user_id, limit=4)
 
     # 4. Get previous response for reflection
@@ -1175,7 +1183,8 @@ async def handle_multimodal_message(
 
     effective_prompt = clean_prompt if clean_prompt else "Please analyze this file."
     set_agent_context(memory_engine=memory, user_id=user_id)
-    tools_to_use = None if use_search else get_all_agent_tools()
+    routed_tools = get_tools_for_route(route)
+    tools_to_use = None if use_search else (routed_tools or None)
     response = await gemini.generate_multimodal(
         prompt=effective_prompt,
         media_path=media_path,

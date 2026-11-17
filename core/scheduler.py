@@ -171,6 +171,7 @@ class SchedulerService:
         self._task: Optional[asyncio.Task] = None
         self._events_task: Optional[asyncio.Task] = None
         self._last_report_date: Optional[str] = None
+        self._last_consolidation_date: Optional[str] = None
         self._last_alert_time: Optional[datetime] = None
         self._container_alert_throttle: dict[str, datetime] = {}
 
@@ -295,6 +296,15 @@ class SchedulerService:
 
                     # 3. Scheduled Reminders Check
                     await self._check_reminders()
+
+                    # 4. Daily L3 Memory Consolidation (dedup rules/facts & prune old history)
+                    if self._last_consolidation_date != today_str:
+                        self._last_consolidation_date = today_str
+                        try:
+                            stats = await asyncio.to_thread(self.memory.consolidate_memory)
+                            logger.info(f"Daily L3 memory consolidation complete: {stats}")
+                        except Exception as ce:
+                            logger.warning(f"L3 memory consolidation failed: {ce}")
 
             except Exception as e:
                 logger.error(f"Scheduler loop error: {e}", exc_info=True)

@@ -115,6 +115,9 @@ def get_anycubic_kobra_status() -> str:
         return f"Lỗi tra cứu máy in Anycubic Kobra: {e}"
 
 
+from core.reflex_router import ReflexRoute
+
+
 def get_all_agent_tools() -> List[Callable]:
     """Returns the list of callable functions for Gemini Function Calling."""
     return [
@@ -126,5 +129,24 @@ def get_all_agent_tools() -> List[Callable]:
         search_personal_notes,
         get_anycubic_kobra_status,
     ]
+
+
+def get_tools_for_route(route: ReflexRoute) -> List[Callable]:
+    if route.use_all_tools:
+        return get_all_agent_tools()
+
+    domain_mapping = {
+        "vps_docker": [get_vps_status, get_docker_containers, restart_docker_container],
+        "notes_reminders": [create_scheduled_reminder, save_personal_note, search_personal_notes],
+        "printer_3d": [get_anycubic_kobra_status],
+    }
+
+    tools: List[Callable] = []
+    for domain in route.tool_domains:
+        if domain in domain_mapping:
+            for tool in domain_mapping[domain]:
+                if tool not in tools:
+                    tools.append(tool)
+    return tools
 
 
